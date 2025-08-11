@@ -31,7 +31,7 @@
     };
   };
 
-  outputs = {
+  outputs = inputs: {
     base = ./modules/nixos/base;
     mkFlake = (./lib/mk-flake.nix).mkFlake;
 
