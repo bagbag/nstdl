@@ -56,7 +56,7 @@
     in
 
     # Use the nstdl mkFlake helper to reduce boilerplate.
-    inputs.nstdl.lib.mk-flake.mkFlake {
+    inputs.nstdl.mkFlake {
       inherit self inputs hosts;
       src = ./.; # The root of our flake, which snowfall-lib scans.
     };

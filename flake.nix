@@ -31,27 +31,22 @@
     };
   };
 
-  outputs =
-    { self, inputs, ... }:
-    let
-      lib = inputs.nixpkgs.lib;
-    in
-    {
-      base = ./modules/nixos/base;
-      mkFlake = (./lib/mk-flake.nix).mkFlake;
+  outputs = {
+    base = ./modules/nixos/base;
+    mkFlake = (./lib/mk-flake.nix).mkFlake;
 
-      # NixOS modules provided by this flake
-      nixosModules = {
-        age = ./modules/nixos/age;
-        disko = ./modules/nixos/disko/disko.nix;
-        mariadb-managed = ./modules/nixos/mariadb-managed;
-        postgresql-backup = ./modules/nixos/postgresql-backup;
-        postgresql-managed = ./modules/nixos/postgresql-managed;
-        proxmox-backup = ./modules/nixos/proxmox-backup;
-      };
-
-      overlays = {
-        unstable = import ./overlays/unstable.nix { inherit inputs; };
-      };
+    # NixOS modules provided by this flake
+    nixosModules = {
+      age = ./modules/nixos/age;
+      disko = ./modules/nixos/disko/disko.nix;
+      mariadb-managed = ./modules/nixos/mariadb-managed;
+      postgresql-backup = ./modules/nixos/postgresql-backup;
+      postgresql-managed = ./modules/nixos/postgresql-managed;
+      proxmox-backup = ./modules/nixos/proxmox-backup;
     };
+
+    overlays = {
+      unstable = import ./overlays/unstable.nix { inherit inputs; };
+    };
+  };
 }
