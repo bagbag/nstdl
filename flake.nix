@@ -1,5 +1,5 @@
 {
-  description = "A base collection of NixOS modules and libraries for infrastructure, powered by Snowfall Lib";
+  description = "nstdl - Nix Standard Infrastructure Library";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
@@ -32,32 +32,26 @@
   };
 
   outputs =
-    inputs:
-    inputs.snowfall-lib.mkFlake {
-      inherit inputs;
+    { self, inputs, ... }:
+    let
+      lib = inputs.nixpkgs.lib;
+    in
+    {
+      base = ./modules/nixos/base;
+      mkFlake = (./lib/mk-flake.nix).mkFlake;
 
-      src = ./.;
-
-      snowfall = {
-        namespace = "nstdl";
-
-        meta = {
-          name = "nstdl";
-          title = "Nix Standard Infrastructure Library";
-        };
+      # NixOS modules provided by this flake
+      nixosModules = {
+        age = ./modules/nixos/age;
+        disko = ./modules/nixos/disko/disko.nix;
+        mariadb-managed = ./modules/nixos/mariadb-managed;
+        postgresql-backup = ./modules/nixos/postgresql-backup;
+        postgresql-managed = ./modules/nixos/postgresql-managed;
+        proxmox-backup = ./modules/nixos/proxmox-backup;
       };
 
-      systems.modules.nixos = [
-        ./modules/nixos/base
-        inputs.home-manager.nixosModules.home-manager
-      ];
-
-      homes.modules = [
-        ./modules/home-manager/common.nix
-      ];
-
-      specialArgs = {
-        inherit (inputs) disko ragenix;
+      overlays = {
+        unstable = import ./overlays/unstable.nix { inherit inputs; };
       };
     };
 }

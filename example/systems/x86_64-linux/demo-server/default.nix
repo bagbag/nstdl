@@ -7,17 +7,6 @@
     inputs.nstdl.nixosModules.base
   ];
 
-  # 2. Use nstdl's declarative host configuration.
-  nstdl.hostConfig = {
-    hostname = "demo-server";
-    domain = "example.com";
-    interface = "eth0";
-    ipv4 = "10.0.0.10/24";
-    ipv6 = "fd00::10/64";
-    gateway4 = "10.0.0.1";
-    gateway6 = "fd00::1";
-  };
-
   # 3. Use nstdl's declarative disk management.
   # This defines a simple, unencrypted disk layout for a virtual machine.
   nstdl.disko = {
@@ -57,7 +46,6 @@
 
   # 5. Add any other standard NixOS configuration.
   networking.firewall.allowedTCPPorts = [
-    22
     80
   ];
 

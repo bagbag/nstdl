@@ -123,10 +123,15 @@
             systems.modules.nixos = with inputs; [
               disko.nixosModules.disko
               ragenix.nixosModules.default
+              home-manager.nixosModules.home-manager
+
+              ../../modules/nixos/base
             ];
 
             homes.modules = with inputs; [
               nix-index-database.homeModules.nix-index
+
+              ../../modules/home-manager/common.nix
             ];
 
             # Configure each host based on the `processedHosts` set.
