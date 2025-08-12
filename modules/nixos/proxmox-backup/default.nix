@@ -72,7 +72,7 @@ let
           jobCfg.prune.group
         ]
         ++ (lib.mapAttrsToList (n: v: "--keep-${n}=${toString v}") jobCfg.prune.keep)
-        ++ jobCfg.extraPruneArgs;
+        ++ jobCfg.prune.extraPruneArgs;
 
       gcArgs = [ "garbage-collect" ] ++ jobCfg.extraGcArgs;
 
