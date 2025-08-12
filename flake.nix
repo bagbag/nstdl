@@ -32,7 +32,11 @@
   };
 
   outputs = inputs: {
-    mkFlake = (import ./lib/mk-flake.nix { lib = inputs.nixpkgs.lib; }).mkFlake;
+    mkFlake =
+      (import ./lib/mk-flake.nix {
+        lib = inputs.nixpkgs.lib;
+        inherit inputs;
+      }).mkFlake;
 
     base = ./modules/nixos/base;
 
