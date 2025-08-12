@@ -1,7 +1,7 @@
 { inputs, ... }:
 final: prev: {
   unstable = import inputs.nixpkgs-unstable {
-    inherit (final) system;
-    config.allowUnfree = final.config.allowUnfree or false;
+    inherit (prev) system;
+    config.allowUnfree = prev.config.allowUnfree or false;
   };
 }
