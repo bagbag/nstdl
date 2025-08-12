@@ -32,8 +32,8 @@ in
       hosts,
       specialArgs ? { },
       deployUser ? "root",
-      environmentsPath ? "/modules/environments",
-      diskoConfigurationsPath ? "/modules/disko",
+      environmentsPath ? "modules/environments",
+      diskoConfigurationsPath ? "modules/disko",
       ... # Pass through any other arguments to snowfall-lib.mkFlake
     }@args:
     let
@@ -52,17 +52,22 @@ in
       loadModulesFromDir =
         path:
         let
-          fullPath = src + path;
-          files = builtins.readDir fullPath;
+          fullPath = src + "/" + path;
         in
-        lib.mapAttrs' (
-          name: type:
-          if type == "regular" && lib.hasSuffix ".nix" name then
-            lib.nameValuePair (lib.removeSuffix ".nix" name) (fullPath + "/${name}")
-          else
-            # Skip sub-directories and non-nix files
-            lib.nameValuePair "" null
-        ) files;
+        if builtins.pathExists fullPath then
+          let
+            files = builtins.readDir fullPath;
+          in
+          lib.mapAttrs' (
+            name: type:
+            if type == "regular" && lib.hasSuffix ".nix" name then
+              lib.nameValuePair (lib.removeSuffix ".nix" name) (fullPath + "/${name}")
+            else
+              # Skip sub-directories and non-nix files
+              lib.nameValuePair "" null
+          ) files
+        else
+          { };
 
       # Helper to get a module if it exists, or throw an error.
       # Returns a list containing the module path, or an empty list if not specified.
@@ -81,7 +86,7 @@ in
           if availableConfigs ? "${configName}" then
             [ (availableConfigs."${configName}") ]
           else
-            throw "Host '${hostName}' specifies ${configType} '${configName}', but no corresponding module was found at ${configsPath}/${configName}.nix"
+            throw "Host '${hostName}' specifies ${configType} '${configName}', but no corresponding module was found at ${toString src}/${configsPath}/${configName}.nix"
         else
           [ ];
 
@@ -175,7 +180,7 @@ in
           };
 
           homes = (baseConfig.homes or { }) // {
-            modules = (baseConfig.homes.modules or [ ]) ++ nstdlHomeModules;
+            modules = (base-config.homes.modules or { }) ++ nstdlHomeModules;
           };
         }
       );

@@ -3,10 +3,6 @@
   # It's good practice to set the state version.
   system.stateVersion = "25.05";
 
-  imports = [
-    inputs.nstdl.nixosModules.base
-  ];
-
   # 3. Use nstdl's declarative disk management.
   # This defines a simple, unencrypted disk layout for a virtual machine.
   nstdl.disko = {
