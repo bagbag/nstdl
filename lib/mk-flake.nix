@@ -37,17 +37,15 @@ in
       ... # Pass through any other arguments to snowfall-lib.mkFlake
     }@args:
     let
-      # Remove arguments consumed by this function so they aren't passed to snowfall-lib
-      argsRest = lib.removeAttrs args [
+      nstdlArgs = [
         "self"
-        "inputs"
-        "src"
         "hosts"
-        "specialArgs"
         "deployUser"
         "environmentsPath"
         "diskoConfigurationsPath"
       ];
+
+      snowfallArgs = lib.removeAttrs args nstdlArgs;
 
       # Helper to load all .nix files from a directory into an attribute set.
       # The filename (without .nix) becomes the attribute name.
@@ -119,60 +117,54 @@ in
 
       # Call snowfall-lib to generate the core flake structure.
       sfFlake = nstdlInputs.snowfall-lib.mkFlake (
-        lib.mkMerge [
-          ({
-            inherit inputs src specialArgs;
+        snowfallArgs
+        // {
+          systems.modules.nixos = with inputs; [
+            disko.nixosModules.disko
+            ragenix.nixosModules.default
+            home-manager.nixosModules.home-manager
 
-            systems.modules.nixos = with inputs; [
-              disko.nixosModules.disko
-              ragenix.nixosModules.default
-              home-manager.nixosModules.home-manager
+            ../../modules/nixos/base
+          ];
 
-              ../../modules/nixos/base
-            ];
+          homes.modules = with inputs; [
+            nix-index-database.homeModules.nix-index
 
-            homes.modules = with inputs; [
-              nix-index-database.homeModules.nix-index
+            ../../modules/home-manager/common.nix
+          ];
 
-              ../../modules/home-manager/common.nix
-            ];
+          systems.hosts = lib.mapAttrs (hostname: hostConfig: {
+            # These are host-specific specialArgs. Snowfall-lib will merge the
+            # global specialArgs into these.
+            specialArgs = (snowfallArgs.specialArgs or { }) // {
+              inherit self hostConfig;
+              hosts = processedHosts;
+            };
 
-            # Configure each host based on the `processedHosts` set.
-            systems.hosts = lib.mapAttrs (hostname: hostConfig: {
-              # These are host-specific specialArgs. Snowfall-lib will merge the
-              # global specialArgs into these.
-              specialArgs = {
-                inherit self hostConfig;
-                hosts = processedHosts;
-              };
+            modules =
+              [
+                # Expose hostConfig to modules via `config.nstdl.hostConfig`.
+                ({ config.nstdl.hostConfig = hostConfig; })
+              ]
+              # Dynamically add the environment module if specified for the host.
+              ++ (getValidatedModule {
+                hostName = hostname;
+                inherit hostConfig;
+                configType = "environment";
+                availableConfigs = environmentConfigurations;
+                configsPath = environmentsPath;
+              })
 
-              modules =
-                [
-                  # Expose hostConfig to modules via `config.nstdl.hostConfig`.
-                  ({ config.nstdl.hostConfig = hostConfig; })
-                ]
-                # Dynamically add the environment module if specified for the host.
-                ++ (getValidatedModule {
-                  hostName = hostname;
-                  inherit hostConfig;
-                  configType = "environment";
-                  availableConfigs = environmentConfigurations;
-                  configsPath = environmentsPath;
-                })
-
-                # Dynamically add the disko module if specified for the host.
-                ++ (getValidatedModule {
-                  hostName = hostname;
-                  inherit hostConfig;
-                  configType = "disko";
-                  availableConfigs = diskoConfigurations;
-                  configsPath = diskoConfigurationsPath;
-                });
-            }) processedHosts;
-          })
-          # The user's passthrough configuration
-          argsRest
-        ]
+              # Dynamically add the disko module if specified for the host.
+              ++ (getValidatedModule {
+                hostName = hostname;
+                inherit hostConfig;
+                configType = "disko";
+                availableConfigs = diskoConfigurations;
+                configsPath = diskoConfigurationsPath;
+              });
+          }) processedHosts;
+        }
       );
 
       # Create top-level aliases for each nixosConfiguration.
