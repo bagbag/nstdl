@@ -1,11 +1,11 @@
 {
   lib,
-  hostConfig,
+  config,
   ...
 }:
 {
-  networking.hostName = hostConfig.hostname;
-  networking.domain = hostConfig.domain;
+  networking.hostName = config.nstdl.hostConfig.hostname;
+  networking.domain = config.nstdl.hostConfig.domain;
   networking.useNetworkd = true;
 
   systemd.network = {
@@ -13,20 +13,20 @@
     networks = {
       "10-lan" = {
         matchConfig = {
-          Name = hostConfig.interface;
+          Name = config.nstdl.hostConfig.interface;
         };
         networkConfig = {
           Address = lib.filter (v: v != null) [
-            hostConfig.ipv4
-            hostConfig.ipv6
+            config.nstdl.hostConfig.ipv4
+            config.nstdl.hostConfig.ipv6
           ];
 
           Gateway = lib.filter (v: v != null) [
-            hostConfig.gateway4
-            hostConfig.gateway6
+            config.nstdl.hostConfig.gateway4
+            config.nstdl.hostConfig.gateway6
           ];
 
-          DNS = hostConfig.dns;
+          DNS = config.nstdl.hostConfig.dns;
         };
       };
     };

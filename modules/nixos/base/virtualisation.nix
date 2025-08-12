@@ -1,10 +1,9 @@
 {
   config,
   pkgs,
-  hostConfig,
   ...
 }:
 {
-  services.qemuGuest.enable = hostConfig.virtualisation == "qemu";
-  virtualisation.vmware.guest.enable = hostConfig.virtualisation == "vmware";
+  services.qemuGuest.enable = config.nstdl.hostConfig.virtualisation == "qemu";
+  virtualisation.vmware.guest.enable = config.nstdl.hostConfig.virtualisation == "vmware";
 }

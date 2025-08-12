@@ -141,7 +141,6 @@ in
             specialArgs = (snowfallArgs.specialArgs or { }) // {
               inherit self;
               hosts = processedHosts;
-              hostConfig = config.nstdl.hostConfig;
             };
 
             modules =
