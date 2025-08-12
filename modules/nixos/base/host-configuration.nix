@@ -17,6 +17,7 @@
     virtualisation = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       description = "The virtualisation technology used for this host (e.g. qemu, vmware).";
+      default = null;
     };
     hostname = lib.mkOption {
       type = lib.types.str;
