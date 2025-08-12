@@ -1,4 +1,7 @@
-{ lib, ... }:
+{ lib, inputs, ... }:
+let
+  nstdlInputs = inputs;
+in
 {
   /*
     A wrapper around snowfall-lib.mkFlake to reduce boilerplate for a common setup.
@@ -37,7 +40,6 @@
       # Remove arguments consumed by this function so they aren't passed to snowfall-lib
       argsRest = lib.removeAttrs args [
         "self"
-        "inputs"
         "src"
         "hosts"
         "specialArgs"
@@ -115,7 +117,7 @@
       ) processedHosts;
 
       # Call snowfall-lib to generate the core flake structure.
-      sfFlake = inputs.snowfall-lib.mkFlake (
+      sfFlake = nstdlInputs.snowfall-lib.mkFlake (
         lib.mkMerge [
           ({
             inherit inputs src specialArgs;
@@ -187,7 +189,7 @@
 
           profiles.system = {
             user = "root";
-            path = inputs.deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations."${name}";
+            path = nstdlInputs.deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations."${name}";
           };
         }) deployableHosts;
       };
@@ -206,6 +208,6 @@
       # Add checks for deploy-rs.
       checks =
         (sfFlake.checks or { })
-        // (builtins.mapAttrs (system: deployLib: deployLib.deployChecks self.deploy) inputs.deploy-rs.lib);
+        // (builtins.mapAttrs (system: deployLib: deployLib.deployChecks self.deploy) nstdlInputs.deploy-rs.lib);
     };
 }
