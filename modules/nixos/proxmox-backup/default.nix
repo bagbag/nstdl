@@ -72,7 +72,7 @@ let
           jobCfg.prune.group
         ]
         ++ (lib.mapAttrsToList (n: v: "--keep-${n}=${toString v}") jobCfg.prune.keep)
-        ++ jobCfg.prune.extraPruneArgs;
+        ++ jobCfg.prune.extraArgs;
 
       gcArgs = [ "garbage-collect" ] ++ jobCfg.extraGcArgs;
 
@@ -457,10 +457,10 @@ in
                   default = { };
                   description = "Default `keep` policy for pruning.";
                 };
-                extraPruneArgs = lib.mkOption {
+                extraArgs = lib.mkOption {
                   type = with lib.types; listOf str;
                   default = [ ];
-                  description = "Default `extraPruneArgs` for jobs.";
+                  description = "Default `extraArgs` for jobs.";
                 };
               };
             };
@@ -634,9 +634,9 @@ in
                         yearly = -1; # keep all yearly backups forever
                       };
                     };
-                    extraPruneArgs = lib.mkOption {
+                    extraArgs = lib.mkOption {
                       type = with lib.types; listOf str;
-                      default = cfg.defaults.prune.extraPruneArgs;
+                      default = cfg.defaults.prune.extraArgs;
                       description = "Extra command-line arguments to pass to `proxmox-backup-client prune`.";
                     };
                   };
