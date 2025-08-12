@@ -5,7 +5,7 @@
   ...
 }:
 let
-  cfg = config.services.nstdl.postgresqlBackup;
+  cfg = config.services.nstdl.postgresql-backup;
 
   postgresqlPackage = config.services.postgresql.package;
 
@@ -150,7 +150,7 @@ let
 
 in
 {
-  options.services.nstdl.postgresqlBackup = {
+  options.services.nstdl.postgresql-backup = {
     enable = lib.mkEnableOption "PostgreSQL scheduled backups";
 
     user = lib.mkOption {
@@ -192,7 +192,7 @@ in
       enable = lib.mkOption {
         type = lib.types.bool;
         default = cfg.databases == [ ];
-        defaultText = lib.literalExpression "`services.nstdl.postgresqlBackup.databases` is empty";
+        defaultText = lib.literalExpression "`services.nstdl.postgresql-backup.databases` is empty";
         description = ''
           If true, back up all databases using `pg_dumpall`.
           This is the default behavior if no specific `databases` are listed.
@@ -292,7 +292,7 @@ in
     compressionLevel = lib.mkOption {
       type = lib.types.ints.between 1 19;
       default = if cfg.compression == "zstd" then 10 else 6;
-      defaultText = lib.literalExpression ''if config.services.nstdl.postgresqlBackup.compression == "zstd" then 10 else 6'';
+      defaultText = lib.literalExpression ''if config.services.nstdl.postgresql-backup.compression == "zstd" then 10 else 6'';
       description = ''
         The compression level to use.
         `gzip` accepts levels from 1 (fastest) to 9 (best compression).
@@ -335,11 +335,11 @@ in
       assertions = [
         {
           assertion = !(cfg.backupAll.enable && !cfg.backupAll.globalsOnly && cfg.databases != [ ]);
-          message = "`services.nstdl.postgresqlBackup.backupAll.enable` (for a full data dump) and `services.nstdl.postgresqlBackup.databases` are mutually exclusive. Use one or the other, or set `backupAll.globalsOnly = true;` to backup globals alongside specific databases.";
+          message = "`services.nstdl.postgresql-backup.backupAll.enable` (for a full data dump) and `services.nstdl.postgresql-backup.databases` are mutually exclusive. Use one or the other, or set `backupAll.globalsOnly = true;` to backup globals alongside specific databases.";
         }
         {
           assertion = cfg.backupAll.enable || cfg.databases != [ ];
-          message = "PostgreSQL backup is enabled, but no databases are configured. Set `services.nstdl.postgresqlBackup.backupAll.enable = true;` or specify a list in `services.nstdl.postgresqlBackup.databases`.";
+          message = "PostgreSQL backup is enabled, but no databases are configured. Set `services.nstdl.postgresql-backup.backupAll.enable = true;` or specify a list in `services.nstdl.postgresql-backup.databases`.";
         }
         {
           assertion = !(cfg.backupAll.enable && cfg.format == "custom");

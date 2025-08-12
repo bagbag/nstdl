@@ -5,7 +5,7 @@
   ...
 }:
 let
-  cfg = config.services.nstdl.mariadbManaged;
+  cfg = config.services.nstdl.mariadb-managed;
 
   mkUserManagementCommands =
     userName: userCfg:
@@ -61,7 +61,7 @@ let
   enabledUsers = lib.filterAttrs (n: v: v.enable) cfg.users;
 in
 {
-  options.services.nstdl.mariadbManaged = {
+  options.services.nstdl.mariadb-managed = {
     description = "Declaratively manage MariaDB databases, users, and privileges.";
 
     ensureDatabases = lib.mkOption {
@@ -158,7 +158,7 @@ in
     assertions = [
       {
         assertion = config.services.mysql.enable;
-        message = "services.nstdl.mariadbManaged requires services.mysql.enable to be true.";
+        message = "services.nstdl.mariadb-managed requires services.mysql.enable to be true.";
       }
     ];
 

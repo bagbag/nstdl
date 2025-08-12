@@ -5,7 +5,7 @@
   ...
 }:
 let
-  cfg = config.services.nstdl.postgresqlManaged;
+  cfg = config.services.nstdl.postgresql-managed;
 
   # --- Helpers to generate SQL/Shell commands ---
 
@@ -69,7 +69,7 @@ let
   );
 in
 {
-  options.services.nstdl.postgresqlManaged = {
+  options.services.nstdl.postgresql-managed = {
     description = "Declaratively manage PostgreSQL databases, users, and privileges.";
 
     databases = lib.mkOption {
@@ -80,7 +80,7 @@ in
             owner = lib.mkOption {
               type = lib.types.nullOr lib.types.str;
               default = null;
-              description = "The role that will own this database. This role must be managed in `services.nstdl.postgresqlManaged.users` or exist by other means.";
+              description = "The role that will own this database. This role must be managed in `services.nstdl.postgresql-managed.users` or exist by other means.";
             };
           };
         }

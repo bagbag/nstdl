@@ -85,7 +85,7 @@ To use `nstdl` in your own flake, add it to your `flake.nix` inputs and import i
       };
 
       # Example of using a managed service
-      services.nstdl.postgresqlBackup = {
+      services.nstdl.postgresql-backup = {
         enable = true;
         backupAll.enable = true;
         calendar = "daily";
@@ -113,11 +113,11 @@ To use `nstdl` in your own flake, add it to your `flake.nix` inputs and import i
 
 ### Managed Services
 
-- **PostgreSQL Backups (`services.nstdl.postgresqlBackup`)**: Highly configurable, scheduled backups for PostgreSQL using `pg_dump` or `pg_dumpall`. Features compression, retention policies, and `systemd` timer integration.
+- **PostgreSQL Backups (`services.nstdl.postgresql-backup`)**: Highly configurable, scheduled backups for PostgreSQL using `pg_dump` or `pg_dumpall`. Features compression, retention policies, and `systemd` timer integration.
 - **Proxmox Backups (`services.nstdl.proxmox-backup`)**: Declaratively configure `proxmox-backup-client` jobs for file or block-level backups to a Proxmox Backup Server, including pruning, encryption, and GC jobs.
 - **Managed Databases**:
-  - `services.nstdl.postgresqlManaged`: Declaratively manage PostgreSQL users, databases, owners, and privileges.
-  - `services.nstdl.mariadbManaged`: Declaratively manage MariaDB users, databases, and privileges.
+  - `services.nstdl.postgresql-managed`: Declaratively manage PostgreSQL users, databases, owners, and privileges.
+  - `services.nstdl.mariadb-managed`: Declaratively manage MariaDB users, databases, and privileges.
 - **Home Manager**: Provides a common set of Home Manager configurations for users, including a pre-configured Zsh shell with modern tools like `eza`, `bat`, `fzf`, and useful aliases.
 
 ---

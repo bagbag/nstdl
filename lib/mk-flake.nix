@@ -180,7 +180,7 @@ in
           };
 
           homes = (baseConfig.homes or { }) // {
-            modules = (base-config.homes.modules or { }) ++ nstdlHomeModules;
+            modules = (baseConfig.homes.modules or { }) ++ nstdlHomeModules;
           };
         }
       );
