@@ -91,8 +91,8 @@ in
           [ ];
 
       # Dynamically load configurations from their respective directories.
-      environmentConfigurations = loadModulesFromDir environmentsPath;
-      diskoConfigurations = loadModulesFromDir diskoConfigurationsPath;
+      environmentConfigurations = []; # loadModulesFromDir environmentsPath;
+      diskoConfigurations = []; # loadModulesFromDir diskoConfigurationsPath;
 
       # Process hosts to generate a more detailed `processedHosts` set.
       processedHosts = lib.mapAttrs (
