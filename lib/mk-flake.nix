@@ -139,8 +139,9 @@ in
 
           nstdlHosts = lib.mapAttrs (hostname: hostConfig: {
             specialArgs = (snowfallArgs.specialArgs or { }) // {
-              inherit self hostConfig;
+              inherit self;
               hosts = processedHosts;
+              hostConfig = config.nstdl.hostConfig;
             };
 
             modules =

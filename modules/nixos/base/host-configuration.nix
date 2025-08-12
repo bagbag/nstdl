@@ -7,8 +7,8 @@
   options.nstdl.hostConfig = {
     deploy = lib.mkOption {
       type = lib.types.bool;
-      description = "Whether to deploy this host.";
       default = true;
+      description = "Whether to deploy this host.";
     };
     environment = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
@@ -16,8 +16,8 @@
     };
     virtualisation = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
-      description = "The virtualisation technology used for this host (e.g. qemu, vmware).";
       default = null;
+      description = "The virtualisation technology used for this host (e.g. qemu, vmware).";
     };
     hostname = lib.mkOption {
       type = lib.types.str;
@@ -38,33 +38,33 @@
     };
     ipv4 = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
-      description = "The static IPv4 address (with CIDR) of the machine.";
       default = null;
+      description = "The static IPv4 address (with CIDR) of the machine.";
     };
     ipv4Address = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
-      description = "The IPv4 address (without CIDR) of the machine.";
       default = null;
+      description = "The IPv4 address (without CIDR) of the machine.";
     };
     gateway4 = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
-      description = "The gateway for the static IPv4 address.";
       default = null;
+      description = "The gateway for the static IPv4 address.";
     };
     ipv6 = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
-      description = "The static IPv6 address (with CIDR) of the machine.";
       default = null;
+      description = "The static IPv6 address (with CIDR) of the machine.";
     };
     ipv6Address = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
-      description = "The IPv6 address (without CIDR) of the machine.";
       default = null;
+      description = "The IPv6 address (without CIDR) of the machine.";
     };
     gateway6 = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
-      description = "The gateway for the static IPv6 address.";
       default = null;
+      description = "The gateway for the static IPv6 address.";
     };
     dns = lib.mkOption {
       type = lib.types.listOf lib.types.str;
