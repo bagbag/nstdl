@@ -33,7 +33,7 @@
 
   outputs = inputs: {
     mkFlake =
-      (import ./lib/mk-flake.nix {
+      ((import ./lib/mk-flake.nix) {
         lib = inputs.nixpkgs.lib;
         inherit inputs;
       }).mkFlake;

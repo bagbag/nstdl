@@ -40,6 +40,7 @@ in
       # Remove arguments consumed by this function so they aren't passed to snowfall-lib
       argsRest = lib.removeAttrs args [
         "self"
+        "inputs"
         "src"
         "hosts"
         "specialArgs"
@@ -208,6 +209,8 @@ in
       # Add checks for deploy-rs.
       checks =
         (sfFlake.checks or { })
-        // (builtins.mapAttrs (system: deployLib: deployLib.deployChecks self.deploy) nstdlInputs.deploy-rs.lib);
+        // (builtins.mapAttrs (
+          system: deployLib: deployLib.deployChecks self.deploy
+        ) nstdlInputs.deploy-rs.lib);
     };
 }
