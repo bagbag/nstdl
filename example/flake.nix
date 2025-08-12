@@ -59,5 +59,9 @@
     inputs.nstdl.mkFlake {
       inherit self inputs hosts;
       src = ./.; # The root of our flake, which snowfall-lib scans.
+
+      systems.modules.nixos = with inputs; [
+        nstdl.nixosModules.disko
+      ];
     };
 }

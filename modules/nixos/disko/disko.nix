@@ -104,14 +104,13 @@ let
         else
           { };
 
-      mainPartition =
-        mkIf partitionContent != { } {
-          # Using the disk name ensures this partition name is unique.
-          "${name}" = {
-            size = "100%";
-            content = partitionContent;
-          };
+      mainPartition = mkIf (partitionContent != { }) {
+        # Using the disk name ensures this partition name is unique.
+        "${name}" = {
+          size = "100%";
+          content = partitionContent;
         };
+      };
 
       bootPartition = mkIf (elem "boot" diskCfg.content) {
         ESP = {
