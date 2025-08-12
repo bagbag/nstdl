@@ -125,14 +125,14 @@ in
         let
           baseConfig = snowfallArgs;
 
-          nstdlSystemModules = with inputs; [
+          nstdlSystemModules = with nstdlInputs; [
             disko.nixosModules.disko
             ragenix.nixosModules.default
             home-manager.nixosModules.home-manager
             ../modules/nixos/base
           ];
 
-          nstdlHomeModules = with inputs; [
+          nstdlHomeModules = with nstdlInputs; [
             nix-index-database.homeModules.nix-index
             ../modules/home-manager/common.nix
           ];
