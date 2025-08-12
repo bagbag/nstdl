@@ -91,8 +91,8 @@ in
           [ ];
 
       # Dynamically load configurations from their respective directories.
-      environmentConfigurations = []; # loadModulesFromDir environmentsPath;
-      diskoConfigurations = []; # loadModulesFromDir diskoConfigurationsPath;
+      environmentConfigurations = loadModulesFromDir environmentsPath;
+      diskoConfigurations = loadModulesFromDir diskoConfigurationsPath;
 
       # Process hosts to generate a more detailed `processedHosts` set.
       processedHosts = lib.mapAttrs (
@@ -129,12 +129,12 @@ in
             disko.nixosModules.disko
             ragenix.nixosModules.default
             home-manager.nixosModules.home-manager
-            ../../modules/nixos/base
+            ../modules/nixos/base
           ];
 
           nstdlHomeModules = with inputs; [
             nix-index-database.homeModules.nix-index
-            ../../modules/home-manager/common.nix
+            ../modules/home-manager/common.nix
           ];
 
           nstdlHosts = lib.mapAttrs (hostname: hostConfig: {
