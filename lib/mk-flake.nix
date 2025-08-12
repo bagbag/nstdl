@@ -117,25 +117,22 @@ in
 
       # Call snowfall-lib to generate the core flake structure.
       sfFlake = nstdlInputs.snowfall-lib.mkFlake (
-        snowfallArgs
-        // {
-          systems.modules.nixos = with inputs; [
+        let
+          baseConfig = snowfallArgs;
+
+          nstdlSystemModules = with inputs; [
             disko.nixosModules.disko
             ragenix.nixosModules.default
             home-manager.nixosModules.home-manager
-
             ../../modules/nixos/base
           ];
 
-          homes.modules = with inputs; [
+          nstdlHomeModules = with inputs; [
             nix-index-database.homeModules.nix-index
-
             ../../modules/home-manager/common.nix
           ];
 
-          systems.hosts = lib.mapAttrs (hostname: hostConfig: {
-            # These are host-specific specialArgs. Snowfall-lib will merge the
-            # global specialArgs into these.
+          nstdlHosts = lib.mapAttrs (hostname: hostConfig: {
             specialArgs = (snowfallArgs.specialArgs or { }) // {
               inherit self hostConfig;
               hosts = processedHosts;
@@ -164,6 +161,22 @@ in
                 configsPath = diskoConfigurationsPath;
               });
           }) processedHosts;
+
+        in
+        # Deeply merge the user-provided config with the nstdl-generated config.
+        baseConfig
+        // {
+          systems = (baseConfig.systems or { }) // {
+            modules = (baseConfig.systems.modules or { }) // {
+              nixos = (baseConfig.systems.modules.nixos or [ ]) ++ nstdlSystemModules;
+            };
+
+            hosts = nstdlHosts;
+          };
+
+          homes = (baseConfig.homes or { }) // {
+            modules = (baseConfig.homes.modules or [ ]) ++ nstdlHomeModules;
+          };
         }
       );
 
