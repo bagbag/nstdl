@@ -32,8 +32,9 @@
   };
 
   outputs = inputs: {
+    mkFlake = (import ./lib/mk-flake.nix { lib = inputs.nixpkgs.lib; }).mkFlake;
+
     base = ./modules/nixos/base;
-    mkFlake = (./lib/mk-flake.nix).mkFlake;
 
     # NixOS modules provided by this flake
     nixosModules = {
