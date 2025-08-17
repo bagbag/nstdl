@@ -1,4 +1,14 @@
-{ lib, pkgs, ... }:
+{
+  lib,
+  pkgs,
+  config,
+  ...
+}:
+let
+  adminUsernames = lib.attrNames (
+    lib.filterAttrs (name: user: user.isAdmin) config.nstdl.interactiveUsers.users
+  );
+in
 {
   services.openssh = {
     enable = true;
@@ -21,9 +31,9 @@
 
   security.doas = {
     enable = true;
-    extraRules = [
+    extraRules = lib.mkIf (adminUsernames != [ ]) [
       {
-        groups = [ "wheel" ];
+        users = adminUsernames;
         noPass = true;
       }
     ];
@@ -32,9 +42,9 @@
   # Enable sudo for modules not working with doas
   security.sudo = {
     enable = true;
-    extraRules = [
+    extraRules = lib.mkIf (adminUsernames != [ ]) [
       {
-        groups = [ "wheel" ];
+        users = adminUsernames;
         commands = [
           {
             command = "ALL";

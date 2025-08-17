@@ -86,7 +86,7 @@ in
           if availableConfigs ? "${configName}" then
             [ (availableConfigs."${configName}") ]
           else
-            throw "Host '${hostName}' specifies ${configType} '${configName}', but no corresponding module was found at ${toString src}/${configsPath}/${configName}.nix"
+            throw "Host '${hostName}' specifies ${configType} '${configName}', but no corresponding module was found at ${toString src}/${configsPath}/${configName}.nix. Available ${configType}s are: [${lib.concatStringsSep ", " (lib.attrNames availableConfigs)}]"
         else
           [ ];
 

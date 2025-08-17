@@ -13,73 +13,83 @@
 
 ## Quick Start
 
-To use `nstdl` in your own flake, add it to your `flake.nix` inputs and import its modules into your host configurations.
+`nstdl` provides a `mkFlake` helper function to minimize boilerplate in your flake. It wraps `snowfall-lib` and automatically injects base modules and host-specific configurations.
 
-1.  **Add `nstdl` to your `flake.nix` inputs:**
+1.  **Set up your `flake.nix`:**
+
+    Use `inputs.nstdl.mkFlake` instead of `snowfall-lib.mkFlake`. Define your machine configurations in a central `hosts` attribute set. `nstdl` will automatically inject this data into each corresponding host's configuration.
 
     ```nix
     # flake.nix
     {
-      description = "My awesome infrastructure flake";
+      description = "A demo flake using nstdl";
 
       inputs = {
-        nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-
-        snowfall-lib = {
-          url = "github:snowfallorg/lib";
-          inputs.nixpkgs.follows = "nixpkgs";
-        };
+        nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05"; # Or nixos-unstable
 
         # Add nstdl as an input
         nstdl = {
           url = "github:bagbag/nstdl";
           inputs.nixpkgs.follows = "nixpkgs";
         };
-
-        # ... other inputs like home-manager, etc.
       };
 
-      outputs = inputs: inputs.snowfall-lib.mkFlake {
-        inherit inputs;
-        src = ./.;
-      };
+      outputs = { self, ... }@inputs:
+        let
+          # Define host-specific data centrally. The mkFlake helper injects this
+          # into each host's configuration as `config.nstdl.hostConfig`.
+          # The host key ("demo-server") must match a host directory name.
+          hosts = {
+            "demo-server" = {
+              domain = "example.com";
+              interface = "eth0";
+              ipv4 = "10.0.0.10/24";
+              gateway4 = "10.0.0.1";
+              # You can also add ipv6, etc.
+            };
+          };
+        in
+
+        # Use the nstdl mkFlake helper to reduce boilerplate.
+        # It wraps snowfall-lib, automatically adding base modules and host data.
+        inputs.nstdl.mkFlake {
+          inherit self inputs hosts;
+          src = ./.; # The root of your flake, which snowfall-lib scans.
+        };
     }
     ```
 
-2.  **Import `nstdl` modules in your host configuration:**
+2.  **Create your host configuration:**
 
-    A typical host configuration would import the `nstdl` base module and then use its custom options to configure the system.
+    In your host file (e.g., `systems/x86_64-linux/demo-server/default.nix`), you can now directly use the `nstdl` modules. Note that you no longer need to manually import the base modules or define `nstdl.hostConfig`, as `mkFlake` handles this.
 
     ```nix
-    # systems/x86_64-linux/my-server/default.nix
-    { inputs, ... }:
+    # systems/x86_64-linux/demo-server/default.nix
+    { pkgs, ... }:
     {
-      # Import the core nstdl module set
-      imports = [
-        inputs.nstdl.nixosModules.base
-      ];
+      system.stateVersion = "25.05";
 
-      # Use nstdl's declarative host configuration
-      nstdl.hostConfig = {
-        hostname = "my-server";
-        interface = "eth0";
-        ipv4 = "192.168.1.10/24";
-        gateway4 = "192.168.1.1";
-        ipv6 = "2001:db8::10/64";
-        gateway6 = "2001:db8::1";
+      # Use nstdl's declarative disk management
+      nstdl.disko = {
+        enable = true;
+        disks.os = {
+          device = "/dev/vda"; # or /dev/disk/by-id/...
+          content = [ "boot" "root" "nix" "swap" ];
+        };
       };
 
       # Use nstdl's declarative user management
       nstdl.interactiveUsers = {
         enable = true;
         defaultSshKeys = [
-          "ssh-ed25519 AAAA..." # Your main public key
+          "ssh-ed25519 AAAA..." # Your main public key that is added to all users
         ];
         users = {
-          jane = {
-            isAdmin = true;
-            hashedPasswordFile = config.age.secrets."jane.password".path;
-            extraSshKeys = [ "ssh-ed25519 BBBB..." ];
+          alice = {
+            isAdmin = true; # Grants passwordless sudo/doas
+            extraSshKeys = [
+              "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... alice@example.com"
+            ];
           };
         };
       };
@@ -94,6 +104,7 @@ To use `nstdl` in your own flake, add it to your `flake.nix` inputs and import i
 
       # Your other system configuration...
       services.nginx.enable = true;
+      networking.firewall.allowedTCPPorts = [ 80 ];
     }
     ```
 

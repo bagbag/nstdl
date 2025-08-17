@@ -80,7 +80,8 @@ let
         if diskCfg.fs == "btrfs" then
           {
             type = "btrfs";
-            mountpoint = "/mnt/btrfs-root/${name}";
+            # mount the btrfs root for easy access when manually troubleshooting or adding new subvolumes
+            mountpoint = "/mnt/btrfs-roots/${name}";
             mountOptions = [ "compress=zstd" ];
             subvolumes = generateBtrfsSubvolumes subvolumeNames diskCfg.swapSize;
           }
