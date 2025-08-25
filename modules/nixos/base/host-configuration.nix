@@ -5,6 +5,10 @@
 }:
 {
   options.nstdl.hostConfig = {
+    identifier = lib.mkOption {
+      type = lib.types.str;
+      description = "The unique identifier for this host.";
+    };
     deploy = lib.mkOption {
       type = lib.types.bool;
       default = true;

@@ -66,7 +66,7 @@ in
       lib.mapAttrsToList (
         secretName: secretDef:
         let
-          membersForThisHost = secretDef.acl."${config.networking.hostName}" or null;
+          membersForThisHost = secretDef.acl."${config.nstdl.hostConfig.identifier}" or null;
           hasAclForThisHost = membersForThisHost != null && membersForThisHost != [ ];
           groupName = secretDef.groupName or (getGroupName secretName);
         in

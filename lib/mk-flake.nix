@@ -98,13 +98,14 @@ in
       processedHosts = lib.mapAttrs (
         key: data:
         let
+          identifier = key;
           hostname = if data ? "hostname" then data.hostname else key;
           ipv4Address = if data ? "ipv4" then lib.head (lib.splitString "/" data.ipv4) else null;
           ipv6Address = if data ? "ipv6" then lib.head (lib.splitString "/" data.ipv6) else null;
         in
         data
         // {
-          inherit hostname ipv4Address ipv6Address;
+          inherit identifier hostname ipv4Address ipv6Address;
           host =
             if data ? "host" then
               data.host
