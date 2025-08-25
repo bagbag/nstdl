@@ -19,6 +19,7 @@
       # snowfall-lib (e.g., `systems/x86_64-linux/demo-server`).
       hosts = {
         "demo-server" = {
+          environment = "cloud";
           domain = "example.com";
           interface = "eth0";
           ipv4 = "10.0.0.10/24";
@@ -35,6 +36,7 @@
       src = ./.; # The root of our flake, which snowfall-lib scans.
 
       systems.modules.nixos = with inputs; [
+        nstdl.nixosModules.age
         nstdl.nixosModules.disko
       ];
     };

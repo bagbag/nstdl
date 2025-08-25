@@ -52,22 +52,23 @@ in
       loadModulesFromDir =
         path:
         let
-          fullPath = src + "/" + path;
+          fullPath = lib.path.append src path;
         in
         if builtins.pathExists fullPath then
           let
             files = builtins.readDir fullPath;
+            nixFiles = lib.filterAttrs (name: type: type == "regular" && lib.hasSuffix ".nix" name) files;
           in
-          lib.mapAttrs' (
-            name: type:
-            if type == "regular" && lib.hasSuffix ".nix" name then
-              lib.nameValuePair (lib.removeSuffix ".nix" name) (fullPath + "/${name}")
-            else
-              # Skip sub-directories and non-nix files
-              lib.nameValuePair "" null
-          ) files
+          if nixFiles == { } then
+            lib.trace "Warning: Directory '${toString fullPath}' exists but contains no .nix files." { }
+          else
+            lib.mapAttrs' (
+              name: _: lib.nameValuePair (lib.removeSuffix ".nix" name) (fullPath + "/${name}")
+            ) nixFiles
         else
-          { };
+          lib.trace
+            "Warning: Path '${toString fullPath}' does not exist. No modules will be loaded from this path."
+            { };
 
       # Helper to get a module if it exists, or throw an error.
       # Returns a list containing the module path, or an empty list if not specified.
@@ -99,20 +100,19 @@ in
         key: data:
         let
           identifier = key;
-          hostname = if data ? "hostname" then data.hostname else key;
+          hostname = data.hostname or key;
           ipv4Address = if data ? "ipv4" then lib.head (lib.splitString "/" data.ipv4) else null;
           ipv6Address = if data ? "ipv6" then lib.head (lib.splitString "/" data.ipv6) else null;
         in
         data
         // {
-          inherit identifier hostname ipv4Address ipv6Address;
-          host =
-            if data ? "host" then
-              data.host
-            else if ipv6Address != null then
-              ipv6Address
-            else
-              ipv4Address;
+          inherit
+            identifier
+            hostname
+            ipv4Address
+            ipv6Address
+            ;
+          host = data.host or ipv6Address;
         }
       ) hosts;
 
@@ -142,12 +142,31 @@ in
             specialArgs = (snowfallArgs.specialArgs or { }) // {
               inherit self;
               hosts = processedHosts;
+              hostConfig = hostConfig;
             };
 
             modules =
               [
                 # Expose hostConfig to modules via `config.nstdl.hostConfig`.
                 ({ config.nstdl.hostConfig = hostConfig; })
+
+                # Set a sensible default for the secrets base directory.
+                # This allows users to place secrets in `./secrets/` or
+                # `./secrets/<environment>/` and have them be discovered automatically.
+                (
+                  { lib, ... }:
+                  {
+                    nstdl.age.secretsBaseDir = lib.mkDefault (
+                      let
+                        secretsPath = lib.path.append src "secrets";
+                      in
+                      if hostConfig.environment != null then
+                        lib.path.append secretsPath hostConfig.environment
+                      else
+                        secretsPath
+                    );
+                  }
+                )
               ]
               # Dynamically add the environment module if specified for the host.
               ++ (getValidatedModule {

@@ -43,7 +43,7 @@
     # NixOS modules provided by this flake
     nixosModules = {
       age = ./modules/nixos/age;
-      disko = ./modules/nixos/disko/disko.nix;
+      disko = ./modules/nixos/disko;
       mariadb-managed = ./modules/nixos/mariadb-managed;
       postgresql-backup = ./modules/nixos/postgresql-backup;
       postgresql-managed = ./modules/nixos/postgresql-managed;

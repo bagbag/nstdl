@@ -114,22 +114,36 @@
 
 `nstdl` provides a wide range of modules under the `nstdl` and `services.nstdl` option namespaces.
 
-### System Configuration
+### Core Abstraction: `mkFlake`
 
-- **Base Configuration (`nstdl.hostConfig`)**: A central place to define host-specific settings like hostname, domain, network interfaces, and IP addresses.
-- **User Management (`nstdl.interactiveUsers`)**: Declaratively create system users, grant admin privileges (`doas`/`sudo`), and assign SSH keys. Integrates with Home Manager.
-- **Disk Management (`nstdl.disko`)**: An abstraction over `disko` for defining disk layouts, including encrypted BTRFS setups with subvolumes.
-- **Secret Management (`nstdl.age`)**: A wrapper around `age` that adds host-based Access Control Lists (ACLs), allowing you to specify which users on which hosts can access a given secret.
-- **Sane Defaults**: Automatic garbage collection, hardened security settings, kernel parameters, and more.
+The `mkFlake` helper function is the heart of `nstdl`, designed to streamline your flake setup:
 
-### Managed Services
+- **Wraps `snowfall-lib`** to reduce boilerplate for system and user (Home Manager) configurations.
+- **Injects `hostConfig`**: Automatically makes your central `hosts` data available in each machine's configuration.
+- **Provides Base Modules**: Includes a common set of NixOS and Home Manager modules for a consistent baseline.
+- **Auto-discovery**: Can dynamically load environment- or disko-specific configurations.
+- **`deploy-rs` Integration**: Generates `deploy-rs` configurations and checks for seamless deployments.
 
-- **PostgreSQL Backups (`services.nstdl.postgresql-backup`)**: Highly configurable, scheduled backups for PostgreSQL using `pg_dump` or `pg_dumpall`. Features compression, retention policies, and `systemd` timer integration.
-- **Proxmox Backups (`services.nstdl.proxmox-backup`)**: Declaratively configure `proxmox-backup-client` jobs for file or block-level backups to a Proxmox Backup Server, including pruning, encryption, and GC jobs.
-- **Managed Databases**:
+### System Configuration (`nstdl.*`)
+
+- **Base System & Security**: Implements an opinionated set of defaults for a robust server, including `systemd-boot`, `networkd`, zswap for memory compression, automatic Nix garbage collection, and hardened security settings (`doas`, `sudo`, `nftables` firewall, and secure kernel `sysctl` parameters).
+- **Host Configuration (`nstdl.hostConfig`)**: A central place to define host-specific settings like hostname, domain, network interfaces, and IP addresses.
+- **Disk Management (`nstdl.disko`)**: A high-level abstraction over `disko` for declaratively defining disk layouts. Easily configure complex setups like encrypted BTRFS on LUKS with standard subvolumes (`root`, `home`, `nix`, `swap`).
+- **User Management (`nstdl.interactiveUsers`)**: Declaratively create system users, grant admin privileges (`doas`/`sudo`), and assign SSH keys. Integrates with Home Manager for a seamless user environment.
+- **Secret Management (`nstdl.age`)**: A powerful wrapper around `ragenix` that adds host-based Access Control Lists (ACLs). Define a secret once and declaratively manage which users on which specific hosts are granted read access.
+
+### Managed Services (`services.nstdl.*`)
+
+- **Declarative Databases**:
   - `services.nstdl.postgresql-managed`: Declaratively manage PostgreSQL users, databases, owners, and privileges.
   - `services.nstdl.mariadb-managed`: Declaratively manage MariaDB users, databases, and privileges.
-- **Home Manager**: Provides a common set of Home Manager configurations for users, including a pre-configured Zsh shell with modern tools like `eza`, `bat`, `fzf`, and useful aliases.
+- **Robust Backups**:
+  - **PostgreSQL Backups (`services.nstdl.postgresql-backup`)**: Highly configurable, scheduled backups for PostgreSQL using `pg_dump` or `pg_dumpall`. Features compression (zstd, gzip), custom retention policies, and `systemd` timer integration.
+  - **Proxmox Backups (`services.nstdl.proxmox-backup`)**: Declaratively configure `proxmox-backup-client` jobs for file or block-level backups to a Proxmox Backup Server. Includes scheduling, automated pruning, client-side encryption, and garbage collection jobs.
+
+### User Environment (Home Manager)
+
+- Provides a common set of Home Manager configurations for all managed users, including a pre-configured Zsh shell with modern tools like `eza`, `bat`, `fzf`, `ripgrep`, and useful aliases.
 
 ---
 
@@ -157,7 +171,7 @@ Define a fully encrypted BTRFS system disk with standard subvolumes.
 
 ### Secure Secrets with `nstdl.age`
 
-Define secrets and control access on a per-host, per-user basis. Based on ragenix.
+Define secrets and control access on a per-host, per-user basis. This module is based on `ragenix`.
 
 ```nix
 {
@@ -173,6 +187,34 @@ Define secrets and control access on a per-host, per-user basis. Based on rageni
         # Grant user `deploy` on `server2` read access.
         acl."server2" = [ "deploy" ];
       };
+    };
+  };
+}
+```
+
+### Managed PostgreSQL
+
+Declaratively create a database and a user, granting it privileges and managing its password with `nstdl.age`.
+
+```nix
+{
+  # Assumes the password is managed via nstdl.age
+  services.nstdl.postgresql-managed = {
+    databases.my_app_db = {
+      ensureExists = true;
+      owner = "app-user";
+    };
+    users.app-user = {
+      enable = true;
+      passwordFile = config.age.secrets."postgres-app-user.password".path;
+      privileges = [
+        # Grant connect on the database itself
+        { database = "my_app_db"; on = "DATABASE \"my_app_db\""; grant = "CONNECT"; }
+        # Grant usage on the public schema
+        { database = "my_app_db"; on = "SCHEMA \"public\""; grant = "USAGE"; }
+        # Grant full rights on all tables in the public schema
+        { database = "my_app_db"; on = "ALL TABLES IN SCHEMA \"public\""; grant = "ALL PRIVILEGES"; }
+      ];
     };
   };
 }

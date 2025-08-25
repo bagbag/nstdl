@@ -6,8 +6,32 @@ let
   getGroupName = secretName: "secret-${lib.replaceStrings [ "." ] [ "-" ] secretName}";
 in
 {
-  options = {
-    nstdl.age.secretsBaseDir = lib.mkOption {
+  options.nstdl.age = {
+    ageBin = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "The path to the `age` binary.";
+    };
+
+    identityPaths = lib.mkOption {
+      type = lib.types.nullOr (lib.types.listOf lib.types.str);
+      default = null;
+      description = "A list of paths to recipient keys to decrypt secrets.";
+    };
+
+    secretsDir = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "The directory where secrets are decrypted to by default.";
+    };
+
+    secretsMountPoint = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "The directory where secret generations are created before being linked.";
+    };
+
+    secretsBaseDir = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = null;
       description = ''
@@ -17,14 +41,11 @@ in
       '';
     };
 
-    nstdl.age.secrets = lib.mkOption {
+    secrets = lib.mkOption {
       type = lib.types.attrsOf (
         lib.types.submodule (
           { name, ... }:
           {
-            # Free-form attributes allow passing any standard `age.secrets.<name>` option
-            freeformType = with lib.types; attrsOf anything;
-
             options = {
               file = lib.mkOption {
                 type = lib.types.path;
@@ -52,6 +73,42 @@ in
                 default = null;
                 description = "Override the auto-generated group name for this secret.";
               };
+
+              path = lib.mkOption {
+                type = lib.types.nullOr lib.types.path;
+                default = null;
+                description = "Absolute path where the decrypted secret file will be created.";
+              };
+
+              owner = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                description = "User who should own the decrypted secret file.";
+              };
+
+              group = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                description = "Group who should own the decrypted secret file.";
+              };
+
+              mode = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                description = "Permissions of the decrypted secret file.";
+              };
+
+              symlink = lib.mkOption {
+                type = lib.types.nullOr lib.types.bool;
+                default = null;
+                description = "Whether to symlink the secret (true, default) or copy it (false).";
+              };
+
+              name = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                description = "The name of the decrypted file, if different from the attribute name.";
+              };
             };
           }
         )
@@ -61,8 +118,51 @@ in
     };
   };
 
-  config = lib.mkIf (cfg.secrets != { }) (
-    lib.mkMerge (
+  config = lib.mkIf (cfg.secrets != { }) {
+    age = {
+      ageBin = lib.mkIf (cfg.ageBin != null) cfg.ageBin;
+      identityPaths = lib.mkIf (cfg.identityPaths != null) cfg.identityPaths;
+      secretsDir = lib.mkIf (cfg.secretsDir != null) cfg.secretsDir;
+      secretsMountPoint = lib.mkIf (cfg.secretsMountPoint != null) cfg.secretsMountPoint;
+    };
+
+    age.secrets = lib.mapAttrs (
+      secretName: secretDef:
+      let
+        membersForThisHost = secretDef.acl."${config.nstdl.hostConfig.identifier}" or null;
+        hasAclForThisHost = membersForThisHost != null && membersForThisHost != [ ];
+        groupName = secretDef.groupName or (getGroupName secretName);
+
+        internalAttrs = [
+          "acl"
+          "groupName"
+        ];
+
+        # FIX: Filter out attributes that are null before passing them through.
+        passthroughAttrs =
+          let
+            # First, remove the attributes used only by this module.
+            userDefinedAttrs = lib.attrsets.removeAttrs secretDef internalAttrs;
+          in
+          # Then, filter out any remaining attributes whose value is null.
+          lib.filterAttrs (name: value: value != null) userDefinedAttrs;
+
+        # These attributes are added/defaulted when an ACL is active for this host.
+        aclAttrs = lib.mkIf hasAclForThisHost {
+          group = lib.mkDefault groupName;
+          mode = lib.mkDefault "0440";
+        };
+      in
+      # Merge the passthrough attributes from the user with our ACL-based defaults.
+      lib.mkMerge [
+        passthroughAttrs
+        aclAttrs
+      ]
+    ) cfg.secrets;
+
+    # Generate the `users.groups` definitions for secrets that have an ACL
+    # active on the current host.
+    users.groups = lib.mkMerge (
       lib.mapAttrsToList (
         secretName: secretDef:
         let
@@ -70,26 +170,15 @@ in
           hasAclForThisHost = membersForThisHost != null && membersForThisHost != [ ];
           groupName = secretDef.groupName or (getGroupName secretName);
         in
-        lib.mkMerge [
-          # 1. Base secret definition (passing through all standard age.secrets options)
+        if hasAclForThisHost then
           {
-            age.secrets."${secretName}" = lib.attrsets.removeAttrs secretDef [
-              "acl"
-              "groupName"
-            ];
-          }
-
-          # 2. Group and permission definition for hosts with an ACL
-          (lib.mkIf hasAclForThisHost {
-            users.groups."${groupName}".members = membersForThisHost;
-
-            age.secrets."${secretName}" = {
-              group = lib.mkDefault groupName;
-              mode = lib.mkDefault "0440";
+            "${groupName}" = {
+              members = membersForThisHost;
             };
-          })
-        ]
+          }
+        else
+          { }
       ) cfg.secrets
-    )
-  );
+    );
+  };
 }
