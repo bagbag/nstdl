@@ -103,16 +103,8 @@ let
         else
           { };
 
-      mainPartition = mkIf (partitionContent != { }) {
-        # Using the disk name ensures this partition name is unique.
-        "${name}" = {
-          size = "100%";
-          content = partitionContent;
-        };
-      };
-
       bootPartition = mkIf (elem "boot" diskCfg.content) {
-        ESP = {
+        "esp" = {
           priority = 1;
           size = diskCfg.bootSize;
           type = "EF00";
@@ -125,13 +117,23 @@ let
         };
       };
 
+      mainPartition = mkIf (partitionContent != { }) {
+        "main" = {
+          size = "100%";
+          content = partitionContent;
+        };
+      };
+
     in
     {
       type = "disk";
       device = diskCfg.device;
       content = {
         type = "gpt";
-        partitions = mergeAttrs bootPartition mainPartition;
+        partitions = lib.mkMerge [
+          bootPartition
+          mainPartition
+        ];
       };
     };
 
