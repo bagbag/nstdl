@@ -29,9 +29,9 @@ in
     };
   };
 
-  security.doas = {
+  security.doas = lib.mkIf (adminUsernames != [ ]) {
     enable = true;
-    extraRules = lib.mkIf (adminUsernames != [ ]) [
+    extraRules = [
       {
         users = adminUsernames;
         noPass = true;
