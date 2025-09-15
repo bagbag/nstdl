@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ inputs, pkgs, ... }:
 {
   home.packages = with pkgs; [
     # Core Editors
@@ -24,7 +24,7 @@
   ];
 
   home.sessionVariables = {
-    EDITOR = lib.mkDefault "micro";
+    EDITOR = inputs.nixpkgs.lib.mkDefault "micro";
   };
 
   programs.zsh = {

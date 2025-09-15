@@ -143,7 +143,6 @@
 
           nstdlHomeModules = with inputs; [
             nix-index-database.homeModules.nix-index
-            ../modules/home-manager/common.nix
           ];
 
           nstdlHosts = lib.mapAttrs (hostname: hostConfig: {

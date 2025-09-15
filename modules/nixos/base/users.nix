@@ -7,7 +7,6 @@
 with lib;
 let
   cfg = config.nstdl.interactiveUsers;
-  allManagedUsers = lib.attrNames cfg.users;
 in
 {
   options.nstdl.interactiveUsers = {
@@ -31,6 +30,7 @@ in
               default = false;
               description = ''
                 If true, the user will be granted passwordless `sudo` and `doas` access.
+                This option is ignored for the root user.
               '';
             };
 
@@ -49,22 +49,36 @@ in
                 Example: config.age.secrets."my-user.password-hash".path
               '';
             };
+
+            homeStateVersion = mkOption {
+              type = types.nullOr types.str;
+              default = null;
+              description = ''
+                The state version for this user's Home Manager profile. If set,
+                Home Manager will be enabled for this user.
+              '';
+              example = "25.05";
+            };
           };
         }
       );
       default = { };
       description = ''
         An attribute set of users to create and manage.
-        The key of each attribute is the username.
       '';
       example = literalExpression ''
         {
+          root = {
+            homeStateVersion = "25.05";
+            extraSshKeys = [ "ssh-ed25519 AAAA... root@workstation" ];
+          };
           alice = {
             isAdmin = true;
+            homeStateVersion = "25.05";
             hashedPasswordFile = config.age.secrets."alice.password-hash".path;
             extraSshKeys = [ "ssh-ed25519 AAAA..." ];
           };
-          bob = { };
+          bob = { }; # bob will not have a Home Manager profile
         }
       '';
     };
@@ -73,47 +87,52 @@ in
   config = mkIf cfg.enable {
     users.mutableUsers = mkDefault false;
 
-    users.users =
-      {
-        root = {
-          isNormalUser = false;
+    users.users = mapAttrs' (
+      username: userOpts:
+      let
+        isRoot = username == "root";
+      in
+      nameValuePair username (
+        {
+          isNormalUser = !isRoot;
           shell = pkgs.zsh;
-          openssh.authorizedKeys.keys = cfg.defaultSshKeys;
-        };
-      }
-      // (mapAttrs' (
-        username: userOpts:
-        nameValuePair username {
-          isNormalUser = true;
-          shell = pkgs.zsh;
-          openssh.authorizedKeys.keys = cfg.defaultSshKeys ++ userOpts.extraSshKeys;
+          openssh.authorizedKeys.keys = cfg.defaultSshKeys ++ (userOpts.extraSshKeys or [ ]);
         }
         // optionalAttrs (userOpts.hashedPasswordFile != null) {
           hashedPasswordFile = userOpts.hashedPasswordFile;
         }
-      ) cfg.users);
+      )
+    ) cfg.users;
 
-    snowfallorg.users =
-      {
-        root = {
+    snowfallorg.users = mapAttrs' (
+      username: userOpts:
+      nameValuePair username (
+        (optionalAttrs (userOpts.homeStateVersion != null) {
           home.enable = true;
-        };
-      }
-      // (mapAttrs' (
-        username: userOpts:
-        nameValuePair username {
-          home.enable = true;
-        }
-        // optionalAttrs userOpts.isAdmin {
+        })
+        // (optionalAttrs (username != "root" && (userOpts.isAdmin or false)) {
           admin = true;
-        }
-      ) cfg.users);
+        })
+      )
+    ) cfg.users;
+
+    # Automatically create Home Manager profiles for users where it's enabled.
+    home-manager.users =
+      let
+        usersWithHm = filterAttrs (_: user: user.homeStateVersion != null) cfg.users;
+      in
+      mapAttrs (_: user: {
+        home.stateVersion = user.homeStateVersion;
+        imports = [
+          ../../home-manager/common.nix
+        ];
+      }) usersWithHm;
 
     nix.settings.trusted-users = [
       "root"
       "@wheel"
     ];
 
-    services.openssh.settings.AllowUsers = [ "root" ] ++ allManagedUsers;
+    services.openssh.settings.AllowUsers = lib.attrNames cfg.users;
   };
 }

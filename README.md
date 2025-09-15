@@ -4,9 +4,9 @@
 
 ## Core Philosophy
 
-- **Declarative Abstractions:** Provides high-level, declarative options for complex tasks like disk partitioning (`disko`), secret management (`ragenix`/`age`), user management, and database administration. This reduces boilerplate and enforces consistency.
+- **Declarative Abstractions:** Provides high-level, declarative options for complex tasks like disk partitioning (`disko`), networking, firewalling, secret management (`ragenix`/`age`), user management, and database administration. This reduces boilerplate and enforces consistency.
 - **Opinionated Defaults:** Implements sane defaults for security, maintenance, and system configuration, allowing you to get a well-configured system up and running quickly.
-- **Production-Ready:** Includes modules for common infrastructure needs, such as managed databases (PostgreSQL, MariaDB) and robust, scheduled backups (PostgreSQL, Proxmox Backup Server).
+- **Production-Ready:** Includes modules for common infrastructure needs, such as managed databases (PostgreSQL, MariaDB), robust, scheduled backups (PostgreSQL, Proxmox Backup Server), and seamless deployment tooling (`deploy-rs`).
 - **Modular & Composable:** Built with flakes and Snowfall Lib, it's designed to be a clean, composable layer in your existing NixOS configurations.
 
 ---
@@ -17,7 +17,7 @@
 
 1.  **Set up your `flake.nix`:**
 
-    Use `inputs.nstdl.mkFlake` instead of `snowfall-lib.mkFlake`. Define your machine configurations in a central `hosts` attribute set. `nstdl` will automatically inject this data into each corresponding host's configuration.
+    Use `inputs.nstdl.mkFlake` instead of `snowfall-lib.mkFlake`. Define your machine configurations in a central `hosts` attribute set. `nstdl` will automatically inject this data into each corresponding host's configuration and generate `deploy-rs` tasks.
 
     ```nix
     # flake.nix
@@ -51,7 +51,8 @@
         in
 
         # Use the nstdl mkFlake helper to reduce boilerplate.
-        # It wraps snowfall-lib, automatically adding base modules and host data.
+        # It wraps snowfall-lib, automatically adding base modules, host data,
+        # and deploy-rs integration.
         inputs.nstdl.mkFlake {
           inherit self inputs hosts;
           src = ./.; # The root of your flake, which snowfall-lib scans.
@@ -61,7 +62,7 @@
 
 2.  **Create your host configuration:**
 
-    In your host file (e.g., `systems/x86_64-linux/demo-server/default.nix`), you can now directly use the `nstdl` modules. Note that you no longer need to manually import the base modules or define `nstdl.hostConfig`, as `mkFlake` handles this.
+    In your host file (e.g., `systems/x86_64-linux/demo-server/default.nix`), you can now directly use the `nstdl` modules. The `mkFlake` helper handles importing base modules and injecting `nstdl.hostConfig`.
 
     ```nix
     # systems/x86_64-linux/demo-server/default.nix
@@ -104,8 +105,16 @@
 
       # Your other system configuration...
       services.nginx.enable = true;
-      networking.firewall.allowedTCPPorts = [ 80 ];
     }
+    ```
+
+3.  **Deploy your system:**
+
+    The `mkFlake` helper automatically generates a `deploy` output compatible with `deploy-rs`.
+
+    ```sh
+    # Deploy the demo-server configuration
+    nix run github:serokell/deploy-rs -- .#demo-server
     ```
 
 ---
@@ -118,16 +127,17 @@
 
 The `mkFlake` helper function is the heart of `nstdl`, designed to streamline your flake setup:
 
-- **Wraps `snowfall-lib`** to reduce boilerplate for system and user (Home Manager) configurations.
+- **Wraps `snowfall-lib`**: Reduces boilerplate for system and user (Home Manager) configurations.
 - **Injects `hostConfig`**: Automatically makes your central `hosts` data available in each machine's configuration.
 - **Provides Base Modules**: Includes a common set of NixOS and Home Manager modules for a consistent baseline.
 - **Auto-discovery**: Can dynamically load environment- or disko-specific configurations.
-- **`deploy-rs` Integration**: Generates `deploy-rs` configurations and checks for seamless deployments.
+- **`deploy-rs` Integration**: Automatically generates `deploy-rs` configurations and checks for seamless deployments via a `deploy` flake output.
 
 ### System Configuration (`nstdl.*`)
 
-- **Base System & Security**: Implements an opinionated set of defaults for a robust server, including `systemd-boot`, `networkd`, zswap for memory compression, automatic Nix garbage collection, and hardened security settings (`doas`, `sudo`, `nftables` firewall, and secure kernel `sysctl` parameters).
+- **Base System & Security**: Implements an opinionated set of defaults for a robust server, including `systemd-boot`, `zswap` for memory compression, automatic Nix garbage collection, and hardened security settings (`doas`, secure kernel `sysctl` parameters).
 - **Host Configuration (`nstdl.hostConfig`)**: A central place to define host-specific settings like hostname, domain, network interfaces, and IP addresses.
+- **Networking (`nstdl.networking`)**: Uses the data from `hostConfig` to declaratively configure `systemd-networkd`, simplifying static IP management.
 - **Disk Management (`nstdl.disko`)**: A high-level abstraction over `disko` for declaratively defining disk layouts. Easily configure complex setups like encrypted BTRFS on LUKS with standard subvolumes (`root`, `home`, `nix`, `swap`).
 - **User Management (`nstdl.interactiveUsers`)**: Declaratively create system users, grant admin privileges (`doas`/`sudo`), and assign SSH keys. Integrates with Home Manager for a seamless user environment.
 - **Secret Management (`nstdl.age`)**: A powerful wrapper around `ragenix` that adds host-based Access Control Lists (ACLs). Define a secret once and declaratively manage which users on which specific hosts are granted read access.
@@ -200,6 +210,7 @@ Declaratively create a database and a user, granting it privileges and managing 
 {
   # Assumes the password is managed via nstdl.age
   services.nstdl.postgresql-managed = {
+    enable = true;
     databases.my_app_db = {
       ensureExists = true;
       owner = "app-user";

@@ -33,9 +33,10 @@
     enable = true;
     users.alice = {
       isAdmin = true; # Grants passwordless sudo/doas access
+      homeStateVersion = "25.05"; # Enable Home Manager for this user
       extraSshKeys = [
         # Replace with your actual public SSH key
-        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAGtV/8gK8w+z0kZ4bL5G6f8g8j8Q8j8Q8j8Q8j8Q8j8 alice@example"
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAGtV/8gK8w+z0kZ4bL5G6f8g8j8Q8j8Q8j8Q8j8 alice@example"
       ];
     };
   };
