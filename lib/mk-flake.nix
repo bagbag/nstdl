@@ -1,7 +1,9 @@
-{ lib, inputs, ... }:
-let
-  nstdlInputs = inputs;
-in
+{
+  lib,
+  inputs,
+  selfNixosModules,
+  ...
+}:
 {
   /*
     A wrapper around snowfall-lib.mkFlake to reduce boilerplate for a common setup.
@@ -15,14 +17,14 @@ in
     - Generates `deploy-rs` configuration and checks.
 
     Arguments:
-      - self:                   Required. The final flake's `self` reference.
-      - inputs:                 Required. The flake's `inputs` set.
-      - src:                    Required. The path to the flake's src (usually `./.`).
-      - hosts:               Required. The attrset defining all hosts and their data.
-      - specialArgs:            Optional. Extra specialArgs to pass to all modules.
-      - deployUser:             Optional. The default SSH user for deploy-rs (defaults to "root").
-      - environmentsPath:       Optional. Path within `src` to find environment modules.
-      - diskoConfigurationsPath:Optional. Path within `src` to find disko modules.
+      - self:                    Required. The final flake's `self` reference.
+      - inputs:                  Required. The flake's `inputs` set.
+      - src:                     Required. The path to the flake's src (usually `./.`).
+      - hosts:                   Required. The attrset defining all hosts and their data.
+      - specialArgs:             Optional. Extra specialArgs to pass to all modules.
+      - deployUser:              Optional. The default SSH user for deploy-rs (defaults to "root").
+      - environmentsPath:        Optional. Path within `src` to find environment modules.
+      - diskoConfigurationsPath: Optional. Path within `src` to find disko modules.
   */
   mkFlake =
     {
@@ -122,18 +124,24 @@ in
       ) processedHosts;
 
       # Call snowfall-lib to generate the core flake structure.
-      sfFlake = nstdlInputs.snowfall-lib.mkFlake (
+      sfFlake = inputs.snowfall-lib.mkFlake (
         let
           baseConfig = snowfallArgs;
 
-          nstdlSystemModules = with nstdlInputs; [
-            disko.nixosModules.disko
-            ragenix.nixosModules.default
-            home-manager.nixosModules.home-manager
-            ../modules/nixos/base
-          ];
+          nstdlSystemModules =
+            with inputs;
+            [
+              # External dependencies provided by the user
+              disko.nixosModules.disko
+              ragenix.nixosModules.default
+              home-manager.nixosModules.home-manager
 
-          nstdlHomeModules = with nstdlInputs; [
+              # Internal base module
+              ../modules/nixos/base
+            ]
+            ++ selfNixosModules;
+
+          nstdlHomeModules = with inputs; [
             nix-index-database.homeModules.nix-index
             ../modules/home-manager/common.nix
           ];
@@ -145,46 +153,45 @@ in
               hostConfig = hostConfig;
             };
 
-            modules =
-              [
-                # Expose hostConfig to modules via `config.nstdl.hostConfig`.
-                ({ config.nstdl.hostConfig = hostConfig; })
+            modules = [
+              # Expose hostConfig to modules via `config.nstdl.hostConfig`.
+              ({ config.nstdl.hostConfig = hostConfig; })
 
-                # Set a sensible default for the secrets base directory.
-                # This allows users to place secrets in `./secrets/` or
-                # `./secrets/<environment>/` and have them be discovered automatically.
-                (
-                  { lib, ... }:
-                  {
-                    nstdl.age.secretsBaseDir = lib.mkDefault (
-                      let
-                        secretsPath = lib.path.append src "secrets";
-                      in
-                      if hostConfig.environment != null then
-                        lib.path.append secretsPath hostConfig.environment
-                      else
-                        secretsPath
-                    );
-                  }
-                )
-              ]
-              # Dynamically add the environment module if specified for the host.
-              ++ (getValidatedModule {
-                hostName = hostname;
-                inherit hostConfig;
-                configType = "environment";
-                availableConfigs = environmentConfigurations;
-                configsPath = environmentsPath;
-              })
+              # Set a sensible default for the secrets base directory.
+              # This allows users to place secrets in `./secrets/` or
+              # `./secrets/<environment>/` and have them be discovered automatically.
+              (
+                { lib, ... }:
+                {
+                  nstdl.age.secretsBaseDir = lib.mkDefault (
+                    let
+                      secretsPath = lib.path.append src "secrets";
+                    in
+                    if hostConfig.environment != null then
+                      lib.path.append secretsPath hostConfig.environment
+                    else
+                      secretsPath
+                  );
+                }
+              )
+            ]
+            # Dynamically add the environment module if specified for the host.
+            ++ (getValidatedModule {
+              hostName = hostname;
+              inherit hostConfig;
+              configType = "environment";
+              availableConfigs = environmentConfigurations;
+              configsPath = environmentsPath;
+            })
 
-              # Dynamically add the disko module if specified for the host.
-              ++ (getValidatedModule {
-                hostName = hostname;
-                inherit hostConfig;
-                configType = "disko";
-                availableConfigs = diskoConfigurations;
-                configsPath = diskoConfigurationsPath;
-              });
+            # Dynamically add the disko module if specified for the host.
+            ++ (getValidatedModule {
+              hostName = hostname;
+              inherit hostConfig;
+              configType = "disko";
+              availableConfigs = diskoConfigurations;
+              configsPath = diskoConfigurationsPath;
+            });
           }) processedHosts;
 
         in
@@ -220,7 +227,7 @@ in
 
           profiles.system = {
             user = "root";
-            path = nstdlInputs.deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations."${name}";
+            path = inputs.deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations."${name}";
           };
         }) deployableHosts;
       };
@@ -239,8 +246,6 @@ in
       # Add checks for deploy-rs.
       checks =
         (sfFlake.checks or { })
-        // (builtins.mapAttrs (
-          system: deployLib: deployLib.deployChecks self.deploy
-        ) nstdlInputs.deploy-rs.lib);
+        // (builtins.mapAttrs (system: deployLib: deployLib.deployChecks self.deploy) inputs.deploy-rs.lib);
     };
 }

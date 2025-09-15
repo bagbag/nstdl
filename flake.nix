@@ -1,57 +1,47 @@
 {
   description = "nstdl - Nix Standard Infrastructure Library";
 
+  # Declare the names of all inputs the flake requires.
+  # The consumer flake is responsible for providing the actual sources for these inputs.
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
-    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
-
-    snowfall-lib = {
-      url = "github:snowfallorg/lib";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    disko = {
-      url = "github:nix-community/disko";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    ragenix = {
-      url = "github:yaxitech/ragenix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    home-manager = {
-      url = "github:nix-community/home-manager/release-25.05";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    nix-index-database = {
-      url = "github:nix-community/nix-index-database";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    deploy-rs = {
-      url = "github:serokell/deploy-rs";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    nixpkgs = { };
+    nixpkgs-unstable = { };
+    snowfall-lib = { };
+    disko = { };
+    ragenix = { };
+    home-manager = { };
+    nix-index-database = { };
+    deploy-rs = { };
   };
 
-  outputs = inputs: {
-    mkFlake =
-      ((import ./lib/mk-flake.nix) {
-        lib = inputs.nixpkgs.lib;
-        inherit inputs;
-      }).mkFlake;
+  outputs =
+    { self, ... }@inputs:
+    let
+      nixosModules = {
+        age = ./modules/nixos/age;
+        disko = ./modules/nixos/disko;
+        mariadb-managed = ./modules/nixos/mariadb-managed;
+        postgresql-backup = ./modules/nixos/postgresql-backup;
+        postgresql-managed = ./modules/nixos/postgresql-managed;
+        proxmox-backup = ./modules/nixos/proxmox-backup;
+      };
+    in
+    {
+      mkFlake =
+        ((import ./lib/mk-flake.nix) {
+          lib = inputs.nixpkgs.lib;
+          inherit inputs;
+          # Pass your library's own modules to the helper's context
+          selfNixosModules = inputs.nixpkgs.lib.attrValues nixosModules;
+        }).mkFlake;
 
-    base = ./modules/nixos/base;
+      base = ./modules/nixos/base;
 
-    # NixOS modules provided by this flake
-    nixosModules = {
-      age = ./modules/nixos/age;
-      disko = ./modules/nixos/disko;
-      mariadb-managed = ./modules/nixos/mariadb-managed;
-      postgresql-backup = ./modules/nixos/postgresql-backup;
-      postgresql-managed = ./modules/nixos/postgresql-managed;
-      proxmox-backup = ./modules/nixos/proxmox-backup;
+      # Expose the modules for users who might want to use them individually
+      inherit nixosModules;
+
+      overlays = {
+        unstable = import ./overlays/unstable.nix { inherit inputs; };
+      };
     };
-
-    overlays = {
-      unstable = import ./overlays/unstable.nix { inherit inputs; };
-    };
-  };
 }
