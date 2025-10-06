@@ -3,9 +3,12 @@
   config,
   ...
 }:
+let
+  hasDomain = config.nstdl.hostConfig.domain != null;
+in
 {
   networking.hostName = config.nstdl.hostConfig.hostname;
-  networking.domain = lib.mkIf (lib.isNonEmptyString config.nstdl.hostConfig.domain) config.nstdl.hostConfig.domain;
+  networking.domain = lib.mkIf hasDomain config.nstdl.hostConfig.domain;
 
   networking.useNetworkd = true;
 
