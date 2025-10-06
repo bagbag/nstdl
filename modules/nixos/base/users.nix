@@ -94,7 +94,7 @@ in
       in
       nameValuePair username (
         {
-          isNormalUser = lib.mkIf !isRoot true;
+          isNormalUser = lib.mkIf (isRoot == false) true;
           shell = pkgs.zsh;
           openssh.authorizedKeys.keys = cfg.defaultSshKeys ++ (userOpts.extraSshKeys or [ ]);
         }
