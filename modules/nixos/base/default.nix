@@ -3,6 +3,7 @@
     ./host-configuration.nix
     ./base.nix
     ./maintenance.nix
+    ./monitoring.nix
     ./network.nix
     ./packages.nix
     ./programs.nix
