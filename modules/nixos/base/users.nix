@@ -87,10 +87,6 @@ in
   config = mkIf cfg.enable {
     users.mutableUsers = mkDefault false;
 
-    # Create a user-private group for each non-root user.
-    users.groups = mapAttrs' (username: _: nameValuePair username {})
-      (filterAttrs (n: _: n != "root") cfg.users);
-
     users.users = mapAttrs' (
       username: userOpts:
       let
@@ -98,13 +94,9 @@ in
       in
       nameValuePair username (
         {
-          isNormalUser = !isRoot;
+          isNormalUser = lib.mkIf !isRoot true;
           shell = pkgs.zsh;
           openssh.authorizedKeys.keys = cfg.defaultSshKeys ++ (userOpts.extraSshKeys or [ ]);
-        }
-        # Set the primary group for non-root users to a group with the same name.
-        // optionalAttrs (!isRoot) {
-          group = username;
         }
         // optionalAttrs (userOpts.hashedPasswordFile != null) {
           hashedPasswordFile = userOpts.hashedPasswordFile;
