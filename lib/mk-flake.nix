@@ -117,14 +117,12 @@
 
           host =
             data.host or (
-              if data.domain != null then
-                "${hostname}.${data.domain}"
-              else if ipv6Address != null then
+              if ipv6Address != null then
                 ipv6Address
               else if ipv4Address != null then
                 ipv4Address
               else
-                hostname
+                "${hostname}.${data.domain}"
             );
         }
       ) hosts;
