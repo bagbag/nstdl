@@ -94,7 +94,7 @@ in
       in
       nameValuePair username (
         {
-          isNormalUser = !isRoot;
+          isNormalUser = isRoot == false;
           isSystemUser = isRoot;
 
           shell = pkgs.zsh;
