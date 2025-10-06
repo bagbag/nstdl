@@ -28,7 +28,7 @@
       description = "The hostname of the machine.";
     };
     domain = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
+      type = lib.types.str;
       default = null;
       description = "The domain of the machine.";
     };
