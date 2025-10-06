@@ -98,7 +98,9 @@
       # Example of using a managed service
       services.nstdl.postgresql-backup = {
         enable = true;
-        backupAll.enable = true;
+        # backup specific databases
+        databases = config.services.postgresql.ensureDatabases;
+        # backups all databases using pg_dumpall if left empty
         calendar = "daily";
         retentionDays = 14;
       };

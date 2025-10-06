@@ -117,7 +117,9 @@
 
           host =
             data.host or (
-              if ipv6Address != null then
+              if data.domain != null then
+                "${hostname}.${data.domain}"
+              else if ipv6Address != null then
                 ipv6Address
               else if ipv4Address != null then
                 ipv4Address

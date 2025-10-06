@@ -53,6 +53,7 @@
       hosts = {
         "demo-server" = {
           environment = "cloud";
+          virtualisation = "qemu";
           domain = "example.com";
           interface = "eth0";
           ipv4 = "10.0.0.10/24";
