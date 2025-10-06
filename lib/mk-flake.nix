@@ -114,7 +114,16 @@
             ipv4Address
             ipv6Address
             ;
-          host = data.host or ipv6Address or ipv4Address or hostname;
+
+          host =
+            data.host or (
+              if ipv6Address != null then
+                ipv6Address
+              else if ipv4Address != null then
+                ipv4Address
+              else
+                hostname
+            );
         }
       ) hosts;
 
