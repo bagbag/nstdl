@@ -4,8 +4,8 @@
   ...
 }:
 {
-  networking.hostName = config.nstdl.hostConfig.hostname;
-  networking.domain = config.nstdl.hostConfig.domain;
+  networking.hostName = lib.mkDefault config.nstdl.hostConfig.hostname;
+  networking.domain = lib.mkDefault config.nstdl.hostConfig.domain;
   networking.useNetworkd = true;
 
   systemd.network = {
