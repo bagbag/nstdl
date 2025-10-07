@@ -7,7 +7,7 @@ let
   hasDomain = config.nstdl.hostConfig.domain != null;
 in
 {
-  networking.hostName = config.nstdl.hostConfig.hostname;
+  networking.hostName = lib.mkDefault config.nstdl.hostConfig.hostname;
   networking.domain = lib.mkIf hasDomain config.nstdl.hostConfig.domain;
 
   networking.useNetworkd = true;
