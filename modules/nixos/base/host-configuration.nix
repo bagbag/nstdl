@@ -23,6 +23,10 @@
       default = null;
       description = "The virtualisation technology used for this host (e.g. qemu, vmware).";
     };
+    disko = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      description = "The disk configuration for this host.";
+    };
     hostname = lib.mkOption {
       type = lib.types.str;
       description = "The hostname of the machine.";
