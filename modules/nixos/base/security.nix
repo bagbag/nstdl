@@ -21,7 +21,7 @@ in
   };
 
   networking = {
-    nftables.enable = true;
+    nftables.enable = lib.mkDefault true;
 
     firewall = {
       enable = true;
