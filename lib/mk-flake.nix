@@ -76,7 +76,7 @@
       # Returns a list containing the module path, or an empty list if not specified.
       getValidatedModule =
         {
-          hostName,
+          systemName,
           hostConfig,
           configType,
           availableConfigs,
@@ -89,7 +89,7 @@
           if availableConfigs ? "${configName}" then
             [ (availableConfigs."${configName}") ]
           else
-            throw "Host '${hostName}' specifies ${configType} '${configName}', but no corresponding module was found at ${toString src}/${configsPath}/${configName}.nix. Available ${configType}s are: [${lib.concatStringsSep ", " (lib.attrNames availableConfigs)}]"
+            throw "System '${systemName}' specifies ${configType} '${configName}', but no corresponding module was found at ${toString src}/${configsPath}/${configName}.nix. Available ${configType}s are: [${lib.concatStringsSep ", " (lib.attrNames availableConfigs)}]"
         else
           [ ];
 
@@ -154,7 +154,7 @@
             nix-index-database.homeModules.nix-index
           ];
 
-          nstdlHosts = lib.mapAttrs (hostname: hostConfig: {
+          nstdlHosts = lib.mapAttrs (systemName: hostConfig: {
             specialArgs = (snowfallArgs.specialArgs or { }) // {
               inherit self;
               hosts = processedHosts;
@@ -185,7 +185,7 @@
             ]
             # Dynamically add the environment module if specified for the host.
             ++ (getValidatedModule {
-              hostName = hostname;
+              systemName = systemName;
               inherit hostConfig;
               configType = "environment";
               availableConfigs = environmentConfigurations;
@@ -194,7 +194,7 @@
 
             # Dynamically add the disko module if specified for the host.
             ++ (getValidatedModule {
-              hostName = hostname;
+              systemName = systemName;
               inherit hostConfig;
               configType = "disko";
               availableConfigs = diskoConfigurations;
