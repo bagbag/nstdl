@@ -37,42 +37,42 @@ let
     type: name: jobCfg:
     let
       # Build proxmox-backup-client command and arguments in Nix for safety
-      backupArgs =
-        [ "backup" ]
-        ++ jobCfg.paths
-        ++ (lib.optionals (jobCfg.namespace != null) [
-          "--ns"
-          jobCfg.namespace
-        ])
-        ++ (lib.optionals (jobCfg.backupType != null) [
-          "--backup-type"
-          jobCfg.backupType
-        ])
-        ++ (lib.optionals (jobCfg.backupId != null) [
-          "--backup-id"
-          jobCfg.backupId
-        ])
-        ++ (lib.optionals (jobCfg.encryptionKey.keyFile != null) [
-          "--keyfile"
-          jobCfg.encryptionKey.keyFile
-        ])
-        ++ (lib.optionals (jobCfg.changeDetectionMode != null) [
-          "--change-detection-mode"
-          jobCfg.changeDetectionMode
-        ])
-        ++ (lib.concatMap (p: [
-          "--exclude"
-          p
-        ]) jobCfg.exclude)
-        ++ jobCfg.extraBackupArgs;
+      backupArgs = [
+        "backup"
+      ]
+      ++ jobCfg.paths
+      ++ (lib.optionals (jobCfg.namespace != null) [
+        "--ns"
+        jobCfg.namespace
+      ])
+      ++ (lib.optionals (jobCfg.backupType != null) [
+        "--backup-type"
+        jobCfg.backupType
+      ])
+      ++ (lib.optionals (jobCfg.backupId != null) [
+        "--backup-id"
+        jobCfg.backupId
+      ])
+      ++ (lib.optionals (jobCfg.encryptionKey.keyFile != null) [
+        "--keyfile"
+        jobCfg.encryptionKey.keyFile
+      ])
+      ++ (lib.optionals (jobCfg.changeDetectionMode != null) [
+        "--change-detection-mode"
+        jobCfg.changeDetectionMode
+      ])
+      ++ (lib.concatMap (p: [
+        "--exclude"
+        p
+      ]) jobCfg.exclude)
+      ++ jobCfg.extraBackupArgs;
 
-      pruneArgs =
-        [
-          "prune"
-          jobCfg.prune.group
-        ]
-        ++ (lib.mapAttrsToList (n: v: "--keep-${n}=${toString v}") jobCfg.prune.keep)
-        ++ jobCfg.prune.extraArgs;
+      pruneArgs = [
+        "prune"
+        jobCfg.prune.group
+      ]
+      ++ (lib.mapAttrsToList (n: v: "--keep-${n}=${toString v}") jobCfg.prune.keep)
+      ++ jobCfg.prune.extraArgs;
 
       gcArgs = [ "garbage-collect" ] ++ jobCfg.extraGcArgs;
 
@@ -227,6 +227,10 @@ let
     { name, ... }:
     {
       options = {
+        enable = lib.mkEnableOption "this Proxmox Backup Client job" // {
+          default = true;
+        };
+
         readOnlyPaths = lib.mkOption {
           type = with lib.types; listOf path;
           default = [ ];
@@ -353,6 +357,8 @@ in
   meta.maintainers = with lib.maintainers; [ ];
 
   options.services.nstdl.proxmox-backup = {
+    enable = lib.mkEnableOption "Proxmox Backup Client jobs";
+
     package = lib.mkPackageOption pkgs "proxmox-backup-client" { };
 
     defaults = lib.mkOption {
@@ -603,7 +609,8 @@ in
                       default =
                         let
                           backupType = if config.backupType != null then config.backupType else "host";
-                          backupId = if config.backupId != null then config.backupId else globalConfig.networking.fqdnOrHostName;
+                          backupId =
+                            if config.backupId != null then config.backupId else globalConfig.networking.fqdnOrHostName;
                           baseGroup = "${backupType}/${backupId}";
                         in
                         (lib.optionalString (config.namespace != null) "${config.namespace}/") + baseGroup;
@@ -686,20 +693,24 @@ in
     };
   };
 
-  config = lib.mkIf (cfg.jobs != { } || cfg.gcJobs != { }) (
+  config = lib.mkIf cfg.enable (
     let
-      # Combine backup and gc jobs into a single attrset for unified processing
-      allJobs =
-        (lib.mapAttrs (name: job: job // { _type = "backup"; }) cfg.jobs)
-        // (lib.mapAttrs (name: job: job // { _type = "gc"; }) cfg.gcJobs);
+      # Filter for enabled jobs
+      enabledJobs = lib.filterAttrs (_: job: job.enable) cfg.jobs;
+      enabledGcJobs = lib.filterAttrs (_: job: job.enable) cfg.gcJobs;
+
+      # Combine enabled backup and gc jobs into a single attrset for unified processing
+      allEnabledJobs =
+        (lib.mapAttrs (name: job: job // { _type = "backup"; }) enabledJobs)
+        // (lib.mapAttrs (name: job: job // { _type = "gc"; }) enabledGcJobs);
     in
-    {
+    lib.mkIf (allEnabledJobs != { }) {
       assertions =
         # Common assertions for all job types
         (lib.mapAttrsToList (name: job: {
           assertion = job.repository != null;
           message = "proxmox-backup.${job._type}Jobs.${name}: `repository` must be set, either globally or for the job.";
-        }) allJobs)
+        }) allEnabledJobs)
         ++ (lib.mapAttrsToList (name: job: {
           assertion =
             lib.count (x: x != null) [
@@ -708,7 +719,7 @@ in
               job.passwordCommand
             ] <= 1;
           message = "proxmox-backup.${job._type}Jobs.${name}: Only one of password, passwordFile, or passwordCommand can be set.";
-        }) allJobs)
+        }) allEnabledJobs)
         # Backup-job specific assertions
         ++ (lib.mapAttrsToList (name: job: {
           assertion =
@@ -721,25 +732,25 @@ in
               ]
             ) <= 1;
           message = "proxmox-backup.jobs.${name}.encryptionKey: Only one of password, passwordFile, or passwordCommand can be set.";
-        }) cfg.jobs)
+        }) enabledJobs)
         ++ (lib.mapAttrsToList (name: job: {
           assertion = !(job.prune.enable && job.prune.keep == { });
           message = "proxmox-backup.jobs.${name}: Pruning is enabled but no `keep` options are set. This would delete all backups in the group. Please specify retention options.";
-        }) cfg.jobs)
+        }) enabledJobs)
         ++ (lib.mapAttrsToList (name: job: {
           assertion = job.paths != [ ];
           message = "proxmox-backup.jobs.${name}: The `paths` option cannot be empty for a backup job.";
-        }) cfg.jobs);
+        }) enabledJobs);
 
       systemd.services = lib.mapAttrs' (
         name: job:
         lib.nameValuePair "proxmox-backup-${job._type}-${name}" (mkSystemdJob job._type name job).service
-      ) allJobs;
+      ) allEnabledJobs;
 
       systemd.timers = lib.mapAttrs' (
         name: job:
         lib.nameValuePair "proxmox-backup-${job._type}-${name}" (mkSystemdJob job._type name job).timer
-      ) (lib.filterAttrs (_: j: j.calendar != null) allJobs);
+      ) (lib.filterAttrs (_: j: j.calendar != null) allEnabledJobs);
     }
   );
 }
