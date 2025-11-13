@@ -524,11 +524,11 @@ in
 
               backupId = lib.mkOption {
                 type = with lib.types; nullOr str;
-                default = null;
+                default = globalConfig.networking.fqdnOrHostName;
                 description = ''
                   The ID of the backup, for example a hostname or a VM ID.
                   This, together with `backupType`, forms the backup group.
-                  If not set, the client defaults to the machine's hostname.
+                  If not set, the client defaults to the machines fqdn or hostname.
                   This allows you to override the default group, e.g., to create a `vm/101` backup from within a guest.
                 '';
                 example = "101";
