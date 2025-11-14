@@ -67,8 +67,8 @@ in
               };
 
               groupName = lib.mkOption {
-                type = lib.types.nullOr lib.types.str;
-                default = null;
+                type = lib.types.str;
+                default = "secret-${lib.replaceStrings [ "." ] [ "-" ] name}";
                 description = "Override the auto-generated group name for this secret.";
               };
 
@@ -121,9 +121,6 @@ in
       processedSecrets = lib.mapAttrs (
         secretName: secretDef:
         let
-          # Helper to create a valid group name from the secret name
-          getGroupName = secretName: "secret-${lib.replaceStrings [ "." ] [ "-" ] secretName}";
-
           # Look up the members for the current host's identifier from the acl.
           # The `or null` handles cases where the identifier isn't in the acl map.
           membersForThisHostRaw = secretDef.acl."${config.nstdl.hostConfig.identifier}" or null;
@@ -136,8 +133,8 @@ in
           # A secret has a relevant ACL for this host if the member list exists and is not empty.
           hasAclForThisHost = membersForThisHost != [ ];
 
-          # Determine the group name, using the override if it exists, otherwise generating it.
-          groupName = secretDef.groupName or (getGroupName secretName);
+          # Determine the group name.
+          groupName = secretDef.groupName;
         in
         {
           # Pass through original definition for reference
