@@ -1,9 +1,6 @@
 { config, lib, ... }:
 let
   cfg = config.nstdl.age;
-
-  # Helper to create a valid group name from the secret name
-  getGroupName = secretName: "secret-${lib.replaceStrings [ "." ] [ "-" ] secretName}";
 in
 {
   options.nstdl.age = {
@@ -123,13 +120,22 @@ in
       processedSecrets = lib.mapAttrs (
         secretName: secretDef:
         let
+          # Helper to create a valid group name from the secret name
+          getGroupName = secretName: "secret-${lib.replaceStrings [ "." ] [ "-" ] secretName}";
+
+          # Look up the members for the current host's identifier from the acl.
+          # The `or null` handles cases where the identifier isn't in the acl map.
           membersForThisHostRaw = secretDef.acl."${config.nstdl.hostConfig.identifier}" or null;
 
-          # Filter out null members from the list if it exists
+          # Filter out any null members from the list, in case the list contains dynamic
+          # references that evaluate to null (e.g., a user that doesn't exist on this host).
           membersForThisHost =
             if membersForThisHostRaw == null then null else lib.filter (m: m != null) membersForThisHostRaw;
 
+          # A secret has a relevant ACL for this host if the member list exists and is not empty.
           hasAclForThisHost = membersForThisHost != null && membersForThisHost != [ ];
+
+          # Determine the group name, using the override if it exists, otherwise generating it.
           groupName = secretDef.groupName or (getGroupName secretName);
         in
         {
@@ -139,6 +145,12 @@ in
           inherit hasAclForThisHost membersForThisHost groupName;
         }
       ) cfg.secrets;
+
+      # Create a new attrset containing only the secrets that have a non-empty ACL for this host.
+      secretsWithAclForThisHost = lib.filterAttrs (
+        secretName: processed: processed.hasAclForThisHost
+      ) processedSecrets;
+
     in
     {
       age = {
@@ -171,14 +183,13 @@ in
         ]
       ) processedSecrets;
 
+      # Use the pre-filtered set to generate user groups.
       users.groups = lib.mapAttrs' (
         secretName: processed:
-        lib.mkIf processed.hasAclForThisHost (
-          lib.nameValuePair processed.groupName {
-            members = processed.membersForThisHost;
-          }
-        )
-      ) processedSecrets;
+        lib.nameValuePair processed.groupName {
+          members = processed.membersForThisHost;
+        }
+      ) secretsWithAclForThisHost;
     }
   );
 }
