@@ -131,10 +131,10 @@ in
           # Filter out any null members from the list, in case the list contains dynamic
           # references that evaluate to null (e.g., a user that doesn't exist on this host).
           membersForThisHost =
-            if membersForThisHostRaw == null then null else lib.filter (m: m != null) membersForThisHostRaw;
+            if membersForThisHostRaw == null then [ ] else lib.filter (m: m != null) membersForThisHostRaw;
 
           # A secret has a relevant ACL for this host if the member list exists and is not empty.
-          hasAclForThisHost = membersForThisHost != null && membersForThisHost != [ ];
+          hasAclForThisHost = membersForThisHost != [ ];
 
           # Determine the group name, using the override if it exists, otherwise generating it.
           groupName = secretDef.groupName or (getGroupName secretName);
