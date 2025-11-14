@@ -118,73 +118,67 @@ in
     };
   };
 
-  config = lib.mkIf (cfg.secrets != { }) {
-    age = {
-      ageBin = lib.mkIf (cfg.ageBin != null) cfg.ageBin;
-      identityPaths = lib.mkIf (cfg.identityPaths != null) cfg.identityPaths;
-      secretsDir = lib.mkIf (cfg.secretsDir != null) cfg.secretsDir;
-      secretsMountPoint = lib.mkIf (cfg.secretsMountPoint != null) cfg.secretsMountPoint;
-    };
-
-    age.secrets = lib.mapAttrs (
-      secretName: secretDef:
-      let
-        # Note: We still use `or null` here because we need to know if the ACL was defined at all
-        # vs. being defined but empty after filtering.
-        membersForThisHostRaw = secretDef.acl."${config.nstdl.hostConfig.identifier}" or null;
-        membersForThisHost =
-          if membersForThisHostRaw == null then null else lib.filter (m: m != null) membersForThisHostRaw;
-        hasAclForThisHost = membersForThisHost != null && membersForThisHost != [ ];
-        groupName = secretDef.groupName or (getGroupName secretName);
-
-        internalAttrs = [
-          "acl"
-          "groupName"
-        ];
-
-        # Filter out attributes that are null before passing them through.
-        passthroughAttrs =
-          let
-            # First, remove the attributes used only by this module.
-            userDefinedAttrs = lib.attrsets.removeAttrs secretDef internalAttrs;
-          in
-          # Then, filter out any remaining attributes whose value is null.
-          lib.filterAttrs (name: value: value != null) userDefinedAttrs;
-
-        # These attributes are added/defaulted when an ACL is active for this host.
-        aclAttrs = lib.mkIf hasAclForThisHost {
-          group = lib.mkDefault groupName;
-          mode = lib.mkDefault "0440";
-        };
-      in
-      # Merge the passthrough attributes from the user with our ACL-based defaults.
-      lib.mkMerge [
-        passthroughAttrs
-        aclAttrs
-      ]
-    ) cfg.secrets;
-
-    # Generate the `users.groups` definitions for secrets that have an ACL
-    # active on the current host.
-    users.groups = lib.mkMerge (
-      lib.mapAttrsToList (
+  config = lib.mkIf (cfg.secrets != { }) (
+    let
+      processedSecrets = lib.mapAttrs (
         secretName: secretDef:
         let
-          membersForThisHostRaw = secretDef.acl."${config.nstdl.hostConfig.identifier}" or [ ];
-          # Filter out any null members from the list.
-          membersForThisHost = lib.filter (m: m != null) membersForThisHostRaw;
-          hasAclForThisHost = membersForThisHost != [ ];
+          membersForThisHostRaw = secretDef.acl."${config.nstdl.hostConfig.identifier}" or null;
+
+          # Filter out null members from the list if it exists
+          membersForThisHost =
+            if membersForThisHostRaw == null then null else lib.filter (m: m != null) membersForThisHostRaw;
+
+          hasAclForThisHost = membersForThisHost != null && membersForThisHost != [ ];
           groupName = secretDef.groupName or (getGroupName secretName);
         in
-        if hasAclForThisHost then
-          {
-            "${groupName}" = {
-              members = membersForThisHost;
-            };
+        {
+          # Pass through original definition for reference
+          inherit secretDef;
+          # Add our processed values
+          inherit hasAclForThisHost membersForThisHost groupName;
+        }
+      ) cfg.secrets;
+    in
+    {
+      age = {
+        ageBin = lib.mkIf (cfg.ageBin != null) cfg.ageBin;
+        identityPaths = lib.mkIf (cfg.identityPaths != null) cfg.identityPaths;
+        secretsDir = lib.mkIf (cfg.secretsDir != null) cfg.secretsDir;
+        secretsMountPoint = lib.mkIf (cfg.secretsMountPoint != null) cfg.secretsMountPoint;
+      };
+
+      age.secrets = lib.mapAttrs (
+        secretName: processed:
+        let
+          internalAttrs = [
+            "acl"
+            "groupName"
+          ];
+
+          passthroughAttrs = lib.filterAttrs (n: v: v != null) (
+            lib.attrsets.removeAttrs processed.secretDef internalAttrs
+          );
+
+          aclAttrs = lib.mkIf processed.hasAclForThisHost {
+            group = lib.mkDefault processed.groupName;
+            mode = lib.mkDefault "0440";
+          };
+        in
+        lib.mkMerge [
+          passthroughAttrs
+          aclAttrs
+        ]
+      ) processedSecrets;
+
+      users.groups = lib.mapAttrs' (
+        secretName: processed:
+        lib.mkIf processed.hasAclForThisHost (
+          lib.nameValuePair processed.groupName {
+            members = processed.membersForThisHost;
           }
-        else
-          { }
-      ) cfg.secrets
-    );
-  };
+        )
+      ) processedSecrets;
+    }
+  );
 }
