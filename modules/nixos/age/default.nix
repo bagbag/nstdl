@@ -136,7 +136,7 @@ in
           hasAclForThisHost = membersForThisHost != null && membersForThisHost != [ ];
 
           # Determine the group name, using the override if it exists, otherwise generating it.
-          groupName = secretDef.groupName or (getGroupName secretName);
+          groupName = secretDef.groupName // (getGroupName secretName);
         in
         {
           # Pass through original definition for reference
