@@ -183,7 +183,7 @@ in
         ]
       ) processedSecrets;
 
-      users.groups = lib.attrsets.mapAttrsToAttrs (
+      users.groups = lib.mapAttrsToAttrs (
         secretName: processed:
         lib.attrsets.singleton processed.groupName {
           members = processed.membersForThisHost;
