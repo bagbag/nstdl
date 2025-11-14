@@ -151,7 +151,6 @@ in
       secretsWithAclForThisHost = lib.filterAttrs (
         secretName: processed: processed.hasAclForThisHost
       ) processedSecrets;
-
     in
     {
       age = {
@@ -184,15 +183,12 @@ in
         ]
       ) processedSecrets;
 
-      # Use the filtered set to generate user groups.
-      users.groups = lib.listToAttrs (
-        lib.mapAttrs' (
-          secretName: processed:
-          lib.nameValuePair processed.groupName {
-            members = processed.membersForThisHost;
-          }
-        ) secretsWithAclForThisHost
-      );
+      users.groups = lib.attrsets.mapAttrsToAttrs (
+        secretName: processed:
+        lib.nameValuePair processed.groupName {
+          members = processed.membersForThisHost;
+        }
+      ) secretsWithAclForThisHost;
     }
   );
 }
