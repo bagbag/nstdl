@@ -168,7 +168,7 @@ in
         # Only create a group if the ACL for this host is defined and has members.
         lib.mkIf hasAclForThisHost {
           "${secretDef.groupName}" = {
-            inherit membersForThisHost;
+            members = membersForThisHost;
           };
         }
       ) cfg.secrets
