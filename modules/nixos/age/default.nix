@@ -183,12 +183,14 @@ in
         ]
       ) processedSecrets;
 
-      users.groups = lib.mapAttrsToAttrs (
-        secretName: processed:
-        lib.attrsets.singleton processed.groupName {
-          members = processed.membersForThisHost;
-        }
-      ) secretsWithAclForThisHost;
+      users.groups = lib.attrsets.listToAttrs (
+        lib.mapAttrsToList (
+          secretName: processed:
+          lib.nameValuePair processed.groupName {
+            members = processed.membersForThisHost;
+          }
+        ) secretsWithAclForThisHost
+      );
     }
   );
 }
