@@ -4,6 +4,7 @@ let
 in
 {
   options.nstdl.age = {
+    # ... options section is unchanged ...
     ageBin = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
@@ -183,13 +184,15 @@ in
         ]
       ) processedSecrets;
 
-      # Use the pre-filtered set to generate user groups.
-      users.groups = lib.mapAttrs' (
-        secretName: processed:
-        lib.nameValuePair processed.groupName {
-          members = processed.membersForThisHost;
-        }
-      ) secretsWithAclForThisHost;
+      # Use the filtered set to generate user groups.
+      users.groups = lib.listToAttrs (
+        lib.mapAttrs' (
+          secretName: processed:
+          lib.nameValuePair processed.groupName {
+            members = processed.membersForThisHost;
+          }
+        ) secretsWithAclForThisHost
+      );
     }
   );
 }
