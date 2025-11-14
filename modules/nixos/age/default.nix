@@ -129,7 +129,11 @@ in
     age.secrets = lib.mapAttrs (
       secretName: secretDef:
       let
-        membersForThisHost = secretDef.acl."${config.nstdl.hostConfig.identifier}" or null;
+        # Note: We still use `or null` here because we need to know if the ACL was defined at all
+        # vs. being defined but empty after filtering.
+        membersForThisHostRaw = secretDef.acl."${config.nstdl.hostConfig.identifier}" or null;
+        membersForThisHost =
+          if membersForThisHostRaw == null then null else lib.filter (m: m != null) membersForThisHostRaw;
         hasAclForThisHost = membersForThisHost != null && membersForThisHost != [ ];
         groupName = secretDef.groupName or (getGroupName secretName);
 
@@ -138,7 +142,7 @@ in
           "groupName"
         ];
 
-        # FIX: Filter out attributes that are null before passing them through.
+        # Filter out attributes that are null before passing them through.
         passthroughAttrs =
           let
             # First, remove the attributes used only by this module.
@@ -166,8 +170,10 @@ in
       lib.mapAttrsToList (
         secretName: secretDef:
         let
-          membersForThisHost = secretDef.acl."${config.nstdl.hostConfig.identifier}" or null;
-          hasAclForThisHost = membersForThisHost != null && membersForThisHost != [ ];
+          membersForThisHostRaw = secretDef.acl."${config.nstdl.hostConfig.identifier}" or [ ];
+          # Filter out any null members from the list.
+          membersForThisHost = lib.filter (m: m != null) membersForThisHostRaw;
+          hasAclForThisHost = membersForThisHost != [ ];
           groupName = secretDef.groupName or (getGroupName secretName);
         in
         if hasAclForThisHost then
