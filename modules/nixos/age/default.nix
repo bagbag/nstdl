@@ -4,7 +4,6 @@ let
 in
 {
   options.nstdl.age = {
-    # ... options section is unchanged ...
     ageBin = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
@@ -116,78 +115,63 @@ in
     };
   };
 
-  config = lib.mkIf (cfg.secrets != { }) (
-    let
-      processedSecrets = lib.mapAttrs (
+  config = lib.mkIf (cfg.secrets != { }) {
+    # Pass through top-level age settings to the underlying ragenix module.
+    age = {
+      ageBin = lib.mkIf (cfg.ageBin != null) cfg.ageBin;
+      identityPaths = lib.mkIf (cfg.identityPaths != null) cfg.identityPaths;
+      secretsDir = lib.mkIf (cfg.secretsDir != null) cfg.secretsDir;
+      secretsMountPoint = lib.mkIf (cfg.secretsMountPoint != null) cfg.secretsMountPoint;
+    };
+
+    age.secrets = lib.mapAttrs (
+      secretName: secretDef:
+      let
+        membersForThisHostRaw = secretDef.acl."${config.nstdl.hostConfig.identifier}" or null;
+        membersForThisHost =
+          if membersForThisHostRaw == null then [ ] else lib.filter (m: m != null) membersForThisHostRaw;
+        hasAclForThisHost = membersForThisHost != [ ];
+
+        # These are our module's internal options that shouldn't be passed to ragenix.
+        internalAttrs = [
+          "acl"
+          "groupName"
+        ];
+
+        # Pass through all other options from the secret definition to ragenix.
+        passthroughAttrs = lib.filterAttrs (n: v: v != null) (
+          lib.attrsets.removeAttrs secretDef internalAttrs
+        );
+
+        # If there is an ACL for this host, set default ownership and permissions.
+        aclAttrs = lib.mkIf hasAclForThisHost {
+          group = lib.mkDefault secretDef.groupName;
+          mode = lib.mkDefault "0440";
+        };
+      in
+      lib.mkMerge [
+        passthroughAttrs
+        aclAttrs
+      ]
+    ) cfg.secrets;
+
+    # Define the user groups required by the ACLs.
+    users.groups = lib.mkMerge (
+      lib.mapAttrsToList (
         secretName: secretDef:
         let
-          # Look up the members for the current host's identifier from the acl.
-          # The `or null` handles cases where the identifier isn't in the acl map.
           membersForThisHostRaw = secretDef.acl."${config.nstdl.hostConfig.identifier}" or null;
-
-          # Filter out any null members from the list, in case the list contains dynamic
-          # references that evaluate to null (e.g., a user that doesn't exist on this host).
           membersForThisHost =
             if membersForThisHostRaw == null then [ ] else lib.filter (m: m != null) membersForThisHostRaw;
-
-          # A secret has a relevant ACL for this host if the member list exists and is not empty.
           hasAclForThisHost = membersForThisHost != [ ];
-
-          # Determine the group name.
-          groupName = secretDef.groupName;
         in
-        {
-          # Pass through original definition for reference
-          inherit secretDef;
-          # Add our processed values
-          inherit hasAclForThisHost membersForThisHost groupName;
-        }
-      ) cfg.secrets;
-
-      # Create a new attrset containing only the secrets that have a non-empty ACL for this host.
-      secretsWithAclForThisHost = lib.filterAttrs (
-        secretName: processed: processed.hasAclForThisHost
-      ) processedSecrets;
-    in
-    {
-      age = {
-        ageBin = lib.mkIf (cfg.ageBin != null) cfg.ageBin;
-        identityPaths = lib.mkIf (cfg.identityPaths != null) cfg.identityPaths;
-        secretsDir = lib.mkIf (cfg.secretsDir != null) cfg.secretsDir;
-        secretsMountPoint = lib.mkIf (cfg.secretsMountPoint != null) cfg.secretsMountPoint;
-      };
-
-      age.secrets = lib.mapAttrs (
-        secretName: processed:
-        let
-          internalAttrs = [
-            "acl"
-            "groupName"
-          ];
-
-          passthroughAttrs = lib.filterAttrs (n: v: v != null) (
-            lib.attrsets.removeAttrs processed.secretDef internalAttrs
-          );
-
-          aclAttrs = lib.mkIf processed.hasAclForThisHost {
-            group = lib.mkDefault processed.groupName;
-            mode = lib.mkDefault "0440";
+        # Only create a group if the ACL for this host is defined and has members.
+        lib.mkIf hasAclForThisHost {
+          "${secretDef.groupName}" = {
+            inherit membersForThisHost;
           };
-        in
-        lib.mkMerge [
-          passthroughAttrs
-          aclAttrs
-        ]
-      ) processedSecrets;
-
-      users.groups = lib.attrsets.listToAttrs (
-        lib.mapAttrsToList (
-          secretName: processed:
-          lib.nameValuePair processed.groupName {
-            members = processed.membersForThisHost;
-          }
-        ) secretsWithAclForThisHost
-      );
-    }
-  );
+        }
+      ) cfg.secrets
+    );
+  };
 }
