@@ -11,6 +11,7 @@
     This function automatically:
     - Scans for and loads environment and disko configurations dynamically.
     - Processes `hosts` to add useful attributes like `hostname`, `ipv4Address`, etc.
+    - Validates host definitions to prevent obscure errors.
     - Creates `processedHosts` and `deployableHosts` sets.
     - Configures snowfall-lib with common modules and specialArgs for each host.
     - Exposes NixOS configurations at the top level for tools like nixos-anywhere.
@@ -89,9 +90,33 @@
           if availableConfigs ? "${configName}" then
             [ (availableConfigs."${configName}") ]
           else
-            throw "System '${systemName}' specifies ${configType} '${configName}', but no corresponding module was found at ${toString src}/${configsPath}/${configName}.nix. Available ${configType}s are: [${lib.concatStringsSep ", " (lib.attrNames availableConfigs)}]"
+            # Improvement #3: Clean error path
+            throw
+              "System '${systemName}' specifies ${configType} '${configName}', but no corresponding module was found at ./${configsPath}/${configName}.nix. Available ${configType}s are: [${lib.concatStringsSep ", " (lib.attrNames availableConfigs)}]"
         else
           [ ];
+
+      # Improvement #3: Host Schema Validation
+      validateHostData =
+        name: data:
+        let
+          assertMsg = pred: msg: if pred then true else throw "Host '${name}': ${msg}";
+        in
+        assertMsg (
+          data ? ipv4 -> (data.ipv4 == null || lib.hasInfix "/" data.ipv4)
+        ) "ipv4 must be in CIDR format (e.g. 1.2.3.4/24)"
+        && assertMsg (
+          data ? ipv6 -> (data.ipv6 == null || lib.hasInfix "/" data.ipv6)
+        ) "ipv6 must be in CIDR format (e.g. 2001:db8::1/64)"
+        && assertMsg (
+          data ? domain -> (data.domain == null || builtins.isString data.domain)
+        ) "domain must be a string or null"
+        && assertMsg (
+          data ? environment -> (data.environment == null || builtins.isString data.environment)
+        ) "environment must be a string identifier"
+        && assertMsg (
+          data ? disko -> (data.disko == null || builtins.isString data.disko)
+        ) "disko config must be a string identifier";
 
       # Dynamically load configurations from their respective directories.
       environmentConfigurations = loadModulesFromDir environmentsPath;
@@ -101,6 +126,9 @@
       processedHosts = lib.mapAttrs (
         key: data:
         let
+          # Run validation before processing
+          _isValid = validateHostData key data;
+
           identifier = key;
           hostname = data.hostname or key;
           ipv4Address = if data ? "ipv4" then lib.head (lib.splitString "/" data.ipv4) else null;
