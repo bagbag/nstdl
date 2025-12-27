@@ -1,7 +1,7 @@
 { inputs, pkgs, ... }:
 {
   # It's good practice to set the state version.
-  system.stateVersion = "25.05";
+  system.stateVersion = "25.11";
 
   # 3. Use nstdl's declarative disk management.
   # This defines a simple, unencrypted disk layout for a virtual machine.
@@ -33,7 +33,7 @@
     enable = true;
     users.alice = {
       isAdmin = true; # Grants passwordless sudo/doas access
-      homeStateVersion = "25.05"; # Enable Home Manager for this user
+      homeStateVersion = "25.11"; # Enable Home Manager for this user
       extraSshKeys = [
         # Replace with your actual public SSH key
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAGtV/8gK8w+z0kZ4bL5G6f8g8j8Q8j8Q8j8Q8j8 alice@example"

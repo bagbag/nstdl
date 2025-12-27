@@ -57,7 +57,7 @@ in
                 The state version for this user's Home Manager profile. If set,
                 Home Manager will be enabled for this user.
               '';
-              example = "25.05";
+              example = "25.11";
             };
           };
         }
@@ -69,12 +69,12 @@ in
       example = literalExpression ''
         {
           root = {
-            homeStateVersion = "25.05";
+            homeStateVersion = "25.11";
             extraSshKeys = [ "ssh-ed25519 AAAA... root@workstation" ];
           };
           alice = {
             isAdmin = true;
-            homeStateVersion = "25.05";
+            homeStateVersion = "25.11";
             hashedPasswordFile = config.age.secrets."alice.password-hash".path;
             extraSshKeys = [ "ssh-ed25519 AAAA..." ];
           };
