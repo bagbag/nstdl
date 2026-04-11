@@ -68,7 +68,7 @@
     # systems/x86_64-linux/demo-server/default.nix
     { pkgs, ... }:
     {
-      system.stateVersion = "25.05";
+      system.stateVersion = "25.11";
 
       # Use nstdl's declarative disk management
       nstdl.disko = {

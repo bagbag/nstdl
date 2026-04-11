@@ -222,6 +222,50 @@ let
       };
     };
 
+  mkWrapperScript =
+    name: jobCfg:
+    let
+      envAttrs = lib.attrsets.mergeAttrsList [
+        {
+          PBS_REPOSITORY = jobCfg.repository;
+        }
+        (mkPasswordEnv {
+          name = "${name}-pbs-password";
+          prefix = "PBS";
+          inherit (jobCfg) password passwordFile passwordCommand;
+        })
+        (lib.optionalAttrs (jobCfg.proxy != null) {
+          ALL_PROXY = jobCfg.proxy;
+        })
+        (lib.optionalAttrs (jobCfg.fingerprint != null) {
+          PBS_FINGERPRINT = jobCfg.fingerprint;
+        })
+        # GC jobs do not have the encryptionKey attribute
+        (lib.optionalAttrs (jobCfg ? encryptionKey) (mkPasswordEnv {
+          name = "${name}-pbs-encryption-password";
+          prefix = "PBS_ENCRYPTION";
+          inherit (jobCfg.encryptionKey) password passwordFile passwordCommand;
+        }))
+      ];
+
+      envExport = lib.concatStringsSep "\n" (
+        lib.mapAttrsToList (n: v: "export ${n}=${lib.escapeShellArg (toString v)}") envAttrs
+      );
+
+      # Proxmox Backup Client has no env var for the keyfile, so we provide a helpful printout.
+      keyHint = lib.optionalString (jobCfg ? encryptionKey && jobCfg.encryptionKey.keyFile != null) ''
+        echo "=> Notice: This job uses client-side encryption." >&2
+        echo "=> For restores, remember to append: --keyfile ${lib.escapeShellArg jobCfg.encryptionKey.keyFile}" >&2
+      '';
+    in
+    pkgs.writeShellScriptBin "proxmox-backup-client-${name}" ''
+      # Export Environment variables for connection and auth
+      ${envExport}
+
+      ${keyHint}
+      exec ${cfg.package}/bin/proxmox-backup-client "$@"
+    '';
+
   # Common options for any job that needs to connect to the repository
   commonJobOptions =
     { name, ... }:
@@ -751,6 +795,11 @@ in
         name: job:
         lib.nameValuePair "proxmox-backup-${job._type}-${name}" (mkSystemdJob job._type name job).timer
       ) (lib.filterAttrs (_: j: j.calendar != null) allEnabledJobs);
+
+      # Expose the generated wrapper scripts for easy access within the system environment
+      environment.systemPackages = lib.mapAttrsToList (
+        name: job: mkWrapperScript name job
+      ) allEnabledJobs;
     }
   );
 }
