@@ -252,17 +252,50 @@ let
         lib.mapAttrsToList (n: v: "export ${n}=${lib.escapeShellArg (toString v)}") envAttrs
       );
 
-      # Proxmox Backup Client has no env var for the keyfile, so we provide a helpful printout.
-      keyHint = lib.optionalString (jobCfg ? encryptionKey && jobCfg.encryptionKey.keyFile != null) ''
-        echo "=> Notice: This job uses client-side encryption." >&2
-        echo "=> For restores, remember to append: --keyfile ${lib.escapeShellArg jobCfg.encryptionKey.keyFile}" >&2
-      '';
+      # Bash snippet to intelligently inject the keyfile argument only when the subcommand supports it.
+      keyfileInjection =
+        lib.optionalString (jobCfg ? encryptionKey && jobCfg.encryptionKey.keyFile != null)
+          ''
+            CMD="''${1:-}"
+            SUBCMD="''${2:-}"
+            NEEDS_KEY=0
+
+            # Whitelist of commands that accept the --keyfile flag
+            case "$CMD" in
+              backup|restore|mount|map|benchmark|catalog)
+                NEEDS_KEY=1
+                ;;
+              snapshot)
+                if [ "$SUBCMD" = "upload-log" ]; then
+                  NEEDS_KEY=1
+                fi
+                ;;
+            esac
+
+            if [ "$NEEDS_KEY" -eq 1 ]; then
+              # Check if the user already provided --keyfile manually to prevent duplicates
+              HAS_KEY=0
+              for arg in "$@"; do
+                if [[ "$arg" == "--keyfile" || "$arg" == --keyfile=* ]]; then
+                  HAS_KEY=1
+                  break
+                fi
+              done
+
+              if [ "$HAS_KEY" -eq 0 ]; then
+                # Append the keyfile flag safely to the positional parameters array
+                set -- "$@" --keyfile ${lib.escapeShellArg jobCfg.encryptionKey.keyFile}
+              fi
+            fi
+          '';
     in
     pkgs.writeShellScriptBin "proxmox-backup-client-${name}" ''
       # Export Environment variables for connection and auth
       ${envExport}
 
-      ${keyHint}
+      # Auto-inject encryption keyfile if applicable
+      ${keyfileInjection}
+
       exec ${cfg.package}/bin/proxmox-backup-client "$@"
     '';
 
@@ -796,10 +829,7 @@ in
         lib.nameValuePair "proxmox-backup-${job._type}-${name}" (mkSystemdJob job._type name job).timer
       ) (lib.filterAttrs (_: j: j.calendar != null) allEnabledJobs);
 
-      # Expose the generated wrapper scripts for easy access within the system environment
-      environment.systemPackages = lib.mapAttrsToList (
-        name: job: mkWrapperScript name job
-      ) allEnabledJobs;
+      environment.systemPackages = lib.mapAttrsToList mkWrapperScript allEnabledJobs;
     }
   );
 }
