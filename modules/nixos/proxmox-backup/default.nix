@@ -252,46 +252,64 @@ let
         lib.mapAttrsToList (n: v: "export ${n}=${lib.escapeShellArg (toString v)}") envAttrs
       );
 
-      # Bash snippet to intelligently inject the keyfile argument only when the subcommand supports it.
-      keyfileInjection =
-        lib.optionalString (jobCfg ? encryptionKey && jobCfg.encryptionKey.keyFile != null)
-          ''
-            CMD="''${1:-}"
-            SUBCMD="''${2:-}"
-            NEEDS_KEY=0
+      # Bash snippet to intelligently inject an argument only when the subcommand supports it.
+      mkInjectSnippet =
+        flag: value: conditionBash:
+        lib.optionalString (value != null) ''
+          NEEDS_INJECT=0
 
-            # Whitelist of commands that accept the --keyfile flag
-            case "$CMD" in
-              backup|restore|mount|map|benchmark|catalog)
-                NEEDS_KEY=1
-                ;;
-              snapshot)
-                if [ "$SUBCMD" = "upload-log" ]; then
-                  NEEDS_KEY=1
-                fi
-                ;;
-            esac
+          ${conditionBash}
 
-            if [ "$NEEDS_KEY" -eq 1 ]; then
-              # Check if the user already provided --keyfile manually to prevent duplicates
-              HAS_KEY=0
-              for arg in "$@"; do
-                if [[ "$arg" == "--keyfile" || "$arg" == --keyfile=* ]]; then
-                  HAS_KEY=1
-                  break
-                fi
-              done
-
-              if [ "$HAS_KEY" -eq 0 ]; then
-                # Append the keyfile flag safely to the positional parameters array
-                set -- "$@" --keyfile ${lib.escapeShellArg jobCfg.encryptionKey.keyFile}
+          if [ "$NEEDS_INJECT" -eq 1 ]; then
+            # Check if the user already provided the flag manually to prevent duplicates
+            HAS_FLAG=0
+            for arg in "$@"; do
+              if [[ "$arg" == "${flag}" || "$arg" == ${flag}=* ]]; then
+                HAS_FLAG=1
+                break
               fi
+            done
+
+            if [ "$HAS_FLAG" -eq 0 ]; then
+              # Append the flag safely to the positional parameters array
+              set -- "$@" "${flag}" ${lib.escapeShellArg value}
             fi
-          '';
+          fi
+        '';
+
+      # Generate namespace injection
+      nsInjection = mkInjectSnippet "--ns" jobCfg.namespace ''
+        case "$CMD" in
+          backup|catalog|change-owner|group|list|map|mount|prune|restore|snapshot)
+            NEEDS_INJECT=1
+            ;;
+        esac
+      '';
+
+      # Generate keyfile injection
+      keyFile = if jobCfg ? encryptionKey then jobCfg.encryptionKey.keyFile else null;
+      keyfileInjection = mkInjectSnippet "--keyfile" keyFile ''
+        case "$CMD" in
+          backup|restore|mount|map|benchmark|catalog)
+            NEEDS_INJECT=1
+            ;;
+          snapshot)
+            if [ "$SUBCMD" = "upload-log" ]; then
+              NEEDS_INJECT=1
+            fi
+            ;;
+        esac
+      '';
     in
     pkgs.writeShellScriptBin "proxmox-backup-client-${name}" ''
       # Export Environment variables for connection and auth
       ${envExport}
+
+      CMD="''${1:-}"
+      SUBCMD="''${2:-}"
+
+      # Auto-inject namespace if applicable
+      ${nsInjection}
 
       # Auto-inject encryption keyfile if applicable
       ${keyfileInjection}
