@@ -8,6 +8,7 @@
     inetutils
     tcpdump
     ipcalc
+    ghostty.terminfo
 
     ragenix # in case a future flake update breaks the package in nixpkgs: inputs.ragenix.packages.${pkgs.system}.default
   ];
