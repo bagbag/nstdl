@@ -70,10 +70,6 @@ let
         authorizedKeys = sshKeysForPeople (
           lib.attrByPath [ host.accounts.primary "people" ] [ ] host.accounts.users
         );
-        hashedPasswordFile = lib.attrByPath [
-          host.accounts.primary
-          "hashedPasswordFile"
-        ] null host.accounts.users;
       };
     }
     // lib.optionalAttrs (host.platform == "nixos") {
@@ -95,7 +91,7 @@ let
               sshKeys = sshKeysForPeople host.accounts.root.sshPeople;
             };
             users = lib.mapAttrs (name: user: {
-              inherit (user) administrator hashedPasswordFile;
+              inherit (user) administrator;
               sshKeys = sshKeysForPeople user.people;
             }) host.accounts.users;
           };
@@ -206,8 +202,11 @@ in
     (import ./features/desktop-apps.nix { inherit inputs; })
     ./features/accounts.nix
     (import ./features/developer.nix { inherit inputs; })
+    ./features/podman.nix
     ./features/postgresql.nix
     ./features/proxmox-backup.nix
+    ./features/remote-access.nix
+    (import ./features/capabilities.nix { inherit inputs; })
     ./storage.nix
     ./network.nix
     ./deployment.nix
@@ -280,9 +279,12 @@ in
                   types.enum [
                     "developer"
                     "desktop-apps"
+                    "podman"
                     "postgresql"
                     "proxmox-backup"
+                    "remote-access"
                     "secrets"
+                    "foreign-binaries" "container-development" "remote-desktop" "full-stack-developer"
                   ]
                 );
                 default = [ ];
@@ -347,10 +349,6 @@ in
                             type = types.bool;
                             default = false;
                           };
-                          hashedPasswordFile = mkOption {
-                            type = types.nullOr types.path;
-                            default = null;
-                          };
                           home = {
                             enable = mkOption {
                               type = types.bool;
@@ -370,6 +368,7 @@ in
                                   "workstation"
                                   "developer"
                                   "desktop-apps"
+                                  "javascript-development" "python-development" "native-development" "database-client" "developer-extras" "office-tools" "creative-media" "remote-desktop" "messaging" "gnome-extras" "vscode" "ai-agent-tools" "secret-admin" "full-stack-developer"
                                 ]
                               );
                               default = [ ];
@@ -417,6 +416,7 @@ in
                   "workstation"
                   "developer"
                   "desktop-apps"
+                  "javascript-development" "python-development" "native-development" "database-client" "developer-extras" "office-tools" "creative-media" "remote-desktop" "messaging" "gnome-extras" "vscode" "ai-agent-tools" "secret-admin" "full-stack-developer"
                 ]
               );
               default = [ ];

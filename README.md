@@ -56,7 +56,8 @@ This is a breaking redesign. The former Snowfall and `mkFlake` APIs are gone.
 `accounts.people` defines reusable public SSH keys; each host's
 `accounts.users` selects the people allowed to access its Unix accounts. The
 default is the matching name, as in `users.deploy` above. Server administrators
-must also set a secret-backed `hashedPasswordFile`; ordinary deploy accounts do
+must also set `hashedPasswordFile = config.age.secrets.<name>.path` in a host
+module; ordinary deploy accounts do
 not receive sudo by default. The example instead enables an explicit
 SSH-key-only root break-glass path. Production servers should normally use a
 dedicated administrator account with a runtime password hash and enable root
@@ -183,13 +184,23 @@ accounts, and optional root break-glass access.
 
 ## Profiles
 
-- `core`: firewall, garbage collection, Lix, systemd-boot/EFI, zram, and
-  portable baseline defaults.
+- `core`: firewall, scheduled `nh clean` maintenance, Lix, systemd-boot/EFI,
+  zram, and portable baseline defaults.
 - `server`: OpenSSH and the LTS kernel.
 - `workstation`: latest kernel, GNOME, audio, Bluetooth, fonts, Flatpak, and
   desktop baseline.
 - `developer`: Nushell, Zsh, Ghostty, modern command-line tools, and the
   nix-index database.
+- Optional capabilities keep role defaults small: `foreign-binaries`,
+  `container-development`, language toolchains, database and office tools,
+  desktop application bundles, `vscode`, `ai-agent-tools`, and `secret-admin`.
+  `full-stack-developer` composes the approved developer-oriented capabilities;
+  personal identities, secrets, editor settings, and SSH hosts stay in the
+  consuming configuration.
+- `podman`: rootless Podman with DNS-enabled default networking and Docker Hub
+  plus Quay search registries.
+- `remote-access`: OpenSSH with firewall integration, disabled password and
+  keyboard-interactive authentication, and key-only root break-glass support.
 - `postgresql`: typed PostgreSQL roles, databases, memberships, extensions, and
   local dump backups. Role passwords use runtime files loaded as systemd
   credentials, so their contents cannot enter nstdl's Nix configuration.
@@ -197,9 +208,8 @@ accounts, and optional root break-glass access.
   one-off client wrappers.
 - `secrets`: ragenix plus agenix-rekey, with explicit host runtime ACLs.
 
-The NixOS, nix-darwin, and Home Manager profile modules are also exported for
-explicit composition by consumers that do not use flake-parts. They do not
-require a consumer to pass `inputs` through `specialArgs`.
+nstdl is consumed through its flake-parts module. Direct NixOS, nix-darwin, and
+Home Manager module composition is intentionally not a supported API.
 
 ## Input sharing
 
@@ -234,5 +244,4 @@ bash tests/evaluate.sh
 ```
 
 It evaluates NixOS server/workstation, Darwin workstation, standalone Home
-Manager, the public raw module outputs, the repository example, and invalid
-configuration boundaries.
+Manager, the repository example, and invalid configuration boundaries.

@@ -34,7 +34,7 @@ if nix eval --impure --expr "
   (flake.inputs.nixpkgs.lib.nixosSystem {
     system = \"x86_64-linux\";
     modules = [
-      flake.nixosModules.accounts
+      (import "${repo_dir}/modules/nixos/profiles/accounts.nix")
       {
         nstdl.accounts = {
           role = \"server\";
@@ -66,21 +66,34 @@ rm -f "${root_ssh_bypass_output}"
 
 nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-workstation.config.system.build.toplevel.drvPath"
 vmware_guest_enabled="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.virtualisation.vmware.guest.enable")"
+workstation_ssh_enabled="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.services.openssh.enable")"
+workstation_ssh_password_auth="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.services.openssh.settings.PasswordAuthentication")"
+workstation_podman_enabled="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.virtualisation.podman.enable")"
+workstation_podman_search_registries="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.virtualisation.containers.registries.settings.registries.search.registries")"
+workstation_podman_policy="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.virtualisation.containers.policy")"
+workstation_nh_enabled="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.programs.nh.enable")"
+workstation_nh_clean_enabled="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.programs.nh.clean.enable")"
+workstation_nh_clean_args="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-workstation.config.programs.nh.clean.extraArgs")"
+workstation_gc_automatic="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.nix.gc.automatic")"
+workstation_optimise_automatic="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.nix.optimise.automatic")"
+workstation_trusted_users="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.nix.settings.trusted-users")"
+workstation_home_packages="$(nix eval "${override[@]}" --json --apply 'packages: builtins.map (package: package.name) packages' "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.tester.home.packages")"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.nix.settings.substituters"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.nix.gc.automatic"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.programs.firefox.enable"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.programs.thunderbird.enable"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.tester.services.flatpak.update.auto"
-[[ "${qemu_guest_enabled}" == "true" && "${vmware_guest_enabled}" == "true" ]]
+[[ "${qemu_guest_enabled}" == "true" && "${vmware_guest_enabled}" == "true" && "${workstation_ssh_enabled}" == "true" && "${workstation_ssh_password_auth}" == "false" && "${workstation_podman_enabled}" == "true" && "${workstation_podman_search_registries}" == '["docker.io","quay.io"]' && "${workstation_podman_policy}" == *'"default":[{"type":"reject"}]'* && "${workstation_podman_policy}" == *'"docker.io":[{"type":"insecureAcceptAnything"}]'* && "${workstation_podman_policy}" == *'"quay.io":[{"type":"insecureAcceptAnything"}]'* && "${workstation_podman_policy}" == *'"docker-daemon":{"":['* && "${workstation_nh_enabled}" == "true" && "${workstation_nh_clean_enabled}" == "true" && "${workstation_nh_clean_args}" == "--keep 5 --keep-since 14d --optimise" && "${workstation_gc_automatic}" == "false" && "${workstation_optimise_automatic}" == "false" && "${workstation_trusted_users}" == *'"tester"'* ]]
+[[ "${workstation_home_packages}" != *'dbeaver-bin'* && "${workstation_home_packages}" != *'ragenix-'* ]]
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.services.postgresql.ensureDatabases"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.services.postgresql.ensureUsers"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.systemd.timers.nstdl-postgresql-backup-app.timerConfig"
 
-postgresql_backup_script="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-backup-app.script")"
-postgresql_plain_script="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-backup-app_plain.script")"
-postgresql_globals_script="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-backup-globals.script")"
+postgresql_backup_script="$(nix eval "${override[@]}" --apply 'builtins.unsafeDiscardStringContext' --raw "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-backup-app.script")"
+postgresql_plain_script="$(nix eval "${override[@]}" --apply 'builtins.unsafeDiscardStringContext' --raw "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-backup-app_plain.script")"
+postgresql_globals_script="$(nix eval "${override[@]}" --apply 'builtins.unsafeDiscardStringContext' --raw "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-backup-globals.script")"
 postgresql_backup_target="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.systemd.targets.nstdl-postgresql-backup.wants")"
-postgresql_reconcile_script="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-reconcile.script")"
+postgresql_reconcile_script="$(nix eval "${override[@]}" --apply 'builtins.unsafeDiscardStringContext' --raw "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-reconcile.script")"
 postgresql_reconcile_credentials="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-reconcile.serviceConfig.LoadCredential")"
 postgresql_reconcile_wanted_by="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-reconcile.wantedBy")"
 postgresql_backup_after="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-backup-app.after")"
@@ -100,7 +113,7 @@ if nix eval --impure --expr "
   (flake.inputs.nixpkgs.lib.nixosSystem {
     system = \"x86_64-linux\";
     modules = [
-      flake.nixosModules.postgresql
+      (import "${repo_dir}/modules/nixos/features/postgresql.nix")
       {
         services.nstdl.postgresql = {
           enable = true;
@@ -136,6 +149,9 @@ nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-secrets.con
 nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-secrets.config.age.rekey.hostPubkey"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-secrets.config.age.rekey.extraEncryptionPubkeys"
 nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-secrets.config.age.rekey.localStorageDir"
+password_hash_file="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-secrets.config.users.users.admin.hashedPasswordFile")"
+agenix_password_hash_file="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-secrets.config.age.secrets.database-password.path")"
+[[ "${password_hash_file}" == "${agenix_password_hash_file}" ]]
 database_secret_group="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-secrets.config.age.secrets.database-password.group")"
 secret_acl_group="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-secrets.config.users.groups.${database_secret_group}.members")"
 secret_acl_mode="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-secrets.config.age.secrets.database-password.mode")"
@@ -229,10 +245,10 @@ nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-proxmox-ba
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-proxmox-backup.config.systemd.timers.nstdl-proxmox-backup-system.timerConfig"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-proxmox-backup.config.environment.systemPackages"
 
-pbs_script="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-proxmox-backup.config.systemd.services.nstdl-proxmox-backup-system.script")"
+pbs_script="$(nix eval "${override[@]}" --apply 'builtins.unsafeDiscardStringContext' --raw "${fixture}#nixosConfigurations.test-proxmox-backup.config.systemd.services.nstdl-proxmox-backup-system.script")"
 pbs_credentials="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-proxmox-backup.config.systemd.services.nstdl-proxmox-backup-system.serviceConfig.LoadCredential")"
 pbs_after="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-proxmox-backup.config.systemd.services.nstdl-proxmox-backup-system.after")"
-pbs_defaulted_script="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-proxmox-backup.config.systemd.services.nstdl-proxmox-backup-defaulted.script")"
+pbs_defaulted_script="$(nix eval "${override[@]}" --apply 'builtins.unsafeDiscardStringContext' --raw "${fixture}#nixosConfigurations.test-proxmox-backup.config.systemd.services.nstdl-proxmox-backup-defaulted.script")"
 pbs_defaulted_user="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-proxmox-backup.config.systemd.services.nstdl-proxmox-backup-defaulted.serviceConfig.User")"
 pbs_defaulted_group="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-proxmox-backup.config.systemd.services.nstdl-proxmox-backup-defaulted.serviceConfig.Group")"
 pbs_defaulted_timer="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-proxmox-backup.config.systemd.timers.nstdl-proxmox-backup-defaulted.timerConfig")"
@@ -284,7 +300,7 @@ check_invalid_pbs_job() {
     (flake.inputs.nixpkgs.lib.nixosSystem {
       system = \"x86_64-linux\";
       modules = [
-        flake.nixosModules.proxmox-backup
+        (import "${repo_dir}/modules/nixos/features/proxmox-backup.nix")
         {
           services.nstdl.proxmoxBackup = {
             enable = true;
@@ -357,8 +373,8 @@ nix eval --impure --raw --expr "
   (flake.inputs.nixpkgs.lib.nixosSystem {
     system = \"x86_64-linux\";
     modules = [
-      flake.nixosModules.server
-      flake.nixosModules.developer
+      (import "${repo_dir}/modules/nixos/profiles/server.nix")
+      (import "${repo_dir}/modules/nixos/profiles/developer.nix")
       {
         nstdl.hostName = \"raw-server\";
         system.stateVersion = \"25.11\";
@@ -378,7 +394,7 @@ nix eval --impure --raw --expr "
   (flake.inputs.home-manager.lib.homeManagerConfiguration {
     inherit pkgs;
     modules = [
-      flake.homeModules.developer
+      (import "${repo_dir}/modules/home-manager/profiles/developer.nix")
       {
         home.username = \"raw-user\";
         home.homeDirectory = \"/home/raw-user\";
@@ -395,8 +411,8 @@ nix eval --impure --raw --expr "
   (flake.inputs.nix-darwin.lib.darwinSystem {
     system = \"aarch64-darwin\";
     modules = [
-      flake.darwinModules.workstation
-      flake.darwinModules.developer
+      (import "${repo_dir}/modules/darwin/profiles/workstation.nix")
+      (import "${repo_dir}/modules/darwin/profiles/developer.nix")
       {
         nstdl.hostName = \"raw-darwin\";
         nstdl.user.name = \"raw-user\";
@@ -415,7 +431,7 @@ if nix eval --impure --expr "
   (flake.inputs.nixpkgs.lib.nixosSystem {
     system = \"x86_64-linux\";
     modules = [
-      flake.nixosModules.postgresql
+      (import "${repo_dir}/modules/nixos/features/postgresql.nix")
       {
         services.nstdl.postgresql = {
           enable = true;

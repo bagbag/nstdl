@@ -43,11 +43,6 @@ in
         description = "SSH public keys for the primary interactive user.";
       };
 
-      hashedPasswordFile = lib.mkOption {
-        type = lib.types.nullOr lib.types.path;
-        default = null;
-        description = "Optional hashed-password file for the primary interactive user.";
-      };
     };
   };
 
@@ -71,18 +66,22 @@ in
       };
 
       gc = {
-        automatic = lib.mkDefault true;
+        automatic = lib.mkDefault false;
         persistent = lib.mkDefault true;
-        dates = lib.mkDefault "05:00";
-        options = lib.mkDefault "--delete-older-than 14d";
-        randomizedDelaySec = lib.mkDefault "25m";
       };
 
       optimise = {
-        automatic = lib.mkDefault true;
+        automatic = lib.mkDefault false;
         persistent = lib.mkDefault true;
-        dates = lib.mkDefault [ "06:00" ];
-        randomizedDelaySec = lib.mkDefault "25m";
+      };
+    };
+
+    programs.nh = {
+      enable = true;
+      clean = {
+        enable = lib.mkDefault true;
+        dates = lib.mkDefault "08:00";
+        extraArgs = lib.mkDefault "--keep 5 --keep-since 14d --optimise";
       };
     };
 
@@ -106,6 +105,7 @@ in
 
     boot.loader.systemd-boot.enable = lib.mkDefault true;
     boot.loader.efi.canTouchEfiVariables = lib.mkDefault true;
+    boot.tmp.useTmpfs = lib.mkDefault true;
     zramSwap.enable = lib.mkDefault true;
 
     services.qemuGuest.enable = cfg.virtualization == "qemu";
@@ -113,7 +113,11 @@ in
 
     time.timeZone = lib.mkDefault "Europe/Berlin";
     i18n.defaultLocale = lib.mkDefault "en_US.UTF-8";
-    console.keyMap = lib.mkDefault "de-latin1-nodeadkeys";
+    console = {
+      keyMap = lib.mkDefault "de-latin1-nodeadkeys";
+      packages = [ pkgs.terminus_font ];
+      font = "${pkgs.terminus_font}/share/consolefonts/ter-v24b.psf.gz";
+    };
 
     systemd.enableStrictShellChecks = true;
 

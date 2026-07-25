@@ -33,11 +33,6 @@ in
         description = "SSH public keys for the primary user.";
       };
 
-      hashedPasswordFile = lib.mkOption {
-        type = lib.types.nullOr lib.types.path;
-        default = null;
-        description = "Accepted for a shared host schema; unused on Darwin.";
-      };
     };
   };
 

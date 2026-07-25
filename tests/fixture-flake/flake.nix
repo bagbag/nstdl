@@ -66,8 +66,6 @@
               };
               users.admin = {
                 people = [ "alice" ];
-                administrator = true;
-                hashedPasswordFile = ./server-admin-password-hash;
               };
             };
             extraModules = [
@@ -88,6 +86,8 @@
             features = [
               "developer"
               "desktop-apps"
+              "podman"
+              "remote-access"
             ];
             systemStateVersion = "25.11";
             accounts = {
@@ -200,7 +200,14 @@
             features = [ "secrets" ];
             secrets.hostPubkey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPpPhXfy+OmQXWkjhFxn68tDs+++MTXzpSgMS3iM5gwN";
             systemStateVersion = "25.11";
+            accounts.users.admin = {
+              people = [ "alice" ];
+              administrator = true;
+            };
             extraModules = [
+              ({ config, ... }: {
+                nstdl.accounts.users.admin.hashedPasswordFile = config.age.secrets.database-password.path;
+              })
               {
                 fileSystems."/" = {
                   device = "/dev/null";

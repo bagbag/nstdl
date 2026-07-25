@@ -52,8 +52,9 @@ in
               default = false;
             };
             hashedPasswordFile = lib.mkOption {
-              type = lib.types.nullOr lib.types.path;
+              type = lib.types.nullOr lib.types.str;
               default = null;
+              description = "Password-hash file, normally config.age.secrets.<name>.path.";
             };
           };
         }
@@ -94,7 +95,7 @@ in
           openssh.authorizedKeys.keys = user.sshKeys;
         }
         // lib.optionalAttrs (user.hashedPasswordFile != null) {
-          hashedPasswordFile = toString user.hashedPasswordFile;
+          inherit (user) hashedPasswordFile;
         }
       ) users
       // lib.optionalAttrs root.enable {
@@ -102,6 +103,7 @@ in
       };
 
     users.groups.wheel.members = administrators;
+    nix.settings.trusted-users = lib.mkAfter administrators;
     services.openssh.settings = {
       AllowUsers = userNames ++ lib.optional root.enable "root" ++ cfg.extraSshUsers;
       PermitRootLogin = lib.mkIf root.enable "prohibit-password";
