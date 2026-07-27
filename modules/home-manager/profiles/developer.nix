@@ -106,29 +106,49 @@
         def hints-for-command [line: string] {
           let hints = {
             find: { modern: "fd config.nu", nuOwns: "piped" }
+            sort: { nu: "... | sort  (or `sort-by col`)", nuOwns: "piped" }
+            uniq: { nu: "... | uniq  (or `uniq-by col`)", nuOwns: "piped" }
+            ps: { nu: "ps | where name =~ 'chromium'", nuOwns: "bare" }
             grep: { modern: "rg TODO", nu: "... | where $it =~ 'pattern'" }
             cat: { modern: "bat shell.nix", nu: "open file  (structured) or `open --raw file`" }
             sed: { modern: "sd 'old' 'new' file", nu: "... | str replace 'old' 'new'" }
+            awk: { nu: "... | get col  (or `split column ','`)" }
+            head: { nu: "... | first 10" }
+            tail: { nu: "... | last 10" }
+            wc: { nu: "... | length  (rows) or `... | str length` (chars)" }
+            cut: { nu: "... | get col  or `... | split column ','`" }
             du: { modern: "dust -d 2" }
             df: { modern: "duf" }
             top: { modern: "btop" }
+            man: { modern: "tldr tar" }
+            time: { modern: "hyperfine 'cmd a'" }
+            dig: { modern: "doggo example.com" }
+            nslookup: { modern: "doggo example.com MX" }
             diff: { modern: "difft a.nix b.nix" }
             hexdump: { modern: "hexyl file.bin" }
+            xxd: { modern: "hexyl file.bin" }
             tree: { modern: "eza --tree --git-ignore" }
             ping: { modern: "gping 1.1.1.1" }
+            wget: { modern: "curl <url>  (or nushell: `http get <url>`)" }
           }
           $line
             | str trim
             | split row '|'
-            | each {|entry|
-                let parts = ($entry | str trim | split row ' ' | where {|word| $word != "" })
+            | enumerate
+            | each {|it|
+                let parts = ($it.item | str trim | split row ' ' | where {|word| $word != "" })
                 let command = ($parts | first | default "" | str replace --regex '^\^' "")
                 let hint = ($hints | get --optional $command)
                 if $hint == null { null } else {
-                  [
-                    ($hint | get --optional modern | if $in == null { null } else { $"modern: ($in)" })
-                    ($hint | get --optional nu | if $in == null { null } else { $"nu: ($in)" })
-                  ] | where {|value| $value != null } | str join "  |  "
+                  let piped = $it.index > 0
+                  let hasArgs = ($parts | length) > 1
+                  let nuOwns = ($hint | get --optional nuOwns | default "")
+                  if (($nuOwns == "piped" and $piped) or ($nuOwns == "bare" and (not $hasArgs))) { null } else {
+                    [
+                      ($hint | get --optional modern | if $in == null { null } else { $"modern: ($in)" })
+                      ($hint | get --optional nu | if $in == null { null } else { $"nu: ($in)" })
+                    ] | where {|value| $value != null } | str join "  |  "
+                  }
                 }
               }
             | where {|hint| $hint != null }
