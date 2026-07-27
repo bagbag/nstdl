@@ -119,7 +119,9 @@
                   features = [
                     "workstation"
                     "developer"
+                    "developer-extras"
                     "desktop-apps"
+                    "gnome-extras"
                   ];
                 };
               };
