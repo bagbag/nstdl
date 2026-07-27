@@ -360,6 +360,8 @@ nix eval "${override[@]}" --raw "${fixture}#darwinConfigurations.test-darwin.con
 nix eval "${override[@]}" --raw "${fixture}#darwinConfigurations.test-darwin.config.age.rekey.localStorageDir"
 nix eval "${override[@]}" --json "${fixture}#darwinConfigurations.test-darwin.config.homebrew.casks"
 nix eval "${override[@]}" --json "${fixture}#darwinConfigurations.test-darwin.config.nix.gc.automatic"
+darwin_podman_packages="$(nix eval "${override[@]}" --json --apply 'packages: builtins.map (package: package.name) packages' "${fixture}#darwinConfigurations.test-darwin.config.environment.systemPackages")"
+[[ "${darwin_podman_packages}" == *'"podman-'* && "${darwin_podman_packages}" == *'"podman-compose-'* ]]
 nix eval "${override[@]}" --raw "${fixture}#homeConfigurations.test-standalone.config.home.username"
 nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.alice.home.username"
 nix eval "${override[@]}" --json "${fixture}#homeConfigurations.test-standalone.config.programs.lazygit.enable"

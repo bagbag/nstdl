@@ -198,7 +198,9 @@ accounts, and optional root break-glass access.
   personal identities, secrets, editor settings, and SSH hosts stay in the
   consuming configuration.
 - `podman`: rootless Podman with DNS-enabled default networking and Docker Hub
-  plus Quay search registries.
+  plus Quay search registries on NixOS; on macOS it supplies `podman` and
+  `podman-compose`, while the user initializes and starts the Podman VM once
+  with `podman machine init` and `podman machine start`.
 - `remote-access`: OpenSSH with firewall integration, disabled password and
   keyboard-interactive authentication, and key-only root break-glass support.
 - `postgresql`: typed PostgreSQL roles, databases, memberships, extensions, and
