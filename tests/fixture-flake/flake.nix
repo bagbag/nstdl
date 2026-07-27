@@ -13,6 +13,25 @@
     flake-parts.lib.mkFlake { inherit inputs; } {
       imports = [ inputs.nstdl.flakeModules.default ];
 
+      # A consumer may keep a direct configuration beside nstdl-managed hosts.
+      flake.nixosConfigurations.test-direct = inputs.nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        modules = [
+          {
+            networking.hostName = "test-direct";
+            boot.loader.grub = {
+              enable = true;
+              devices = [ "nodev" ];
+            };
+            fileSystems."/" = {
+              device = "/dev/null";
+              fsType = "ext4";
+            };
+            system.stateVersion = "25.11";
+          }
+        ];
+      };
+
       nstdl = {
         accounts.people.tester.sshKeys = [
           "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMM/o1cLFjnD1m41DE41yWySYzOjvN7MizVJLIpbhbXN tester"

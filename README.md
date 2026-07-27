@@ -73,6 +73,9 @@ host facts.
 
 The resulting configuration is available as `.#nixosConfigurations.app-01`.
 For example, build it with `nix build .#nixosConfigurations.app-01.config.system.build.toplevel`.
+You can also declare direct consumer-owned `flake.nixosConfigurations` or
+`flake.darwinConfigurations` entries alongside nstdl-managed hosts, provided
+that each configuration name is unique.
 
 ## Host facts and accounts
 

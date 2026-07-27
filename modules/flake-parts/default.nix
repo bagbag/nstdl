@@ -195,6 +195,7 @@ let
 in
 {
   imports = [
+    inputs.flake-parts.flakeModules.nixosConfigurations
     inputs.agenix-rekey.flakeModule
     ./features/core.nix
     ./features/server.nix
@@ -429,6 +430,12 @@ in
         }
       );
     };
+  };
+
+  options.flake.darwinConfigurations = mkOption {
+    type = types.lazyAttrsOf types.raw;
+    default = { };
+    description = "nix-darwin configurations, including nstdl-managed and consumer-managed hosts.";
   };
 
   config = {

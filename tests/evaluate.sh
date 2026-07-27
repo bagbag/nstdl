@@ -6,6 +6,8 @@ fixture="path:${repo_dir}/tests/fixture-flake"
 override=(--override-input nstdl "path:${repo_dir}" --no-write-lock-file)
 
 nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-server.config.system.build.toplevel.drvPath"
+direct_host_name="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-direct.config.networking.hostName")"
+[[ "${direct_host_name}" == "test-direct" ]]
 server_allow_users="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-server.config.services.openssh.settings.AllowUsers")"
 server_root_keys="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-server.config.users.users.root.openssh.authorizedKeys.keys")"
 server_kernel="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-server.config.boot.kernelPackages.kernel.version")"
