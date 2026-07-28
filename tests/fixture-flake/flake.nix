@@ -40,7 +40,7 @@
           "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPpPhXfy+OmQXWkjhFxn68tDs+++MTXzpSgMS3iM5gwN alice"
         ];
         secrets = {
-          administrators.fixture = {
+          administrators.fixture.keys.test = {
             identity = "/tmp/test-master-age-key";
             publicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMM/o1cLFjnD1m41DE41yWySYzOjvN7MizVJLIpbhbXN";
           };

@@ -65,6 +65,8 @@ let
       throw "nstdl secrets host '${name}' must set secrets.hostPubkey"
     else if hasFeature "secrets" host && secretPolicy.administrators == { } then
       throw "nstdl secrets host '${name}' requires at least one nstdl.secrets.administrators entry"
+    else if hasFeature "secrets" host && administratorKeys == [ ] then
+      throw "nstdl secrets administrators require at least one configured key"
     else if
       hasFeature "secrets" host
       && secretPolicy.storage.mode == "local"
@@ -81,9 +83,7 @@ let
       throw "nstdl secrets host '${name}' must use an age or SSH public recipient key"
     else if
       hasFeature "secrets" host
-      && lib.any (administrator: !isRecipient administrator.publicKey) (
-        lib.attrValues secretPolicy.administrators
-      )
+      && lib.any (key: !isRecipient key.publicKey) administratorKeys
     then
       throw "nstdl secrets administrators must use age or SSH public recipient keys"
     else if
@@ -94,9 +94,7 @@ let
     else if
       hasFeature "secrets" host
       && lib.elem (canonicalRecipient host.secrets.hostPubkey) (
-        map (administrator: canonicalRecipient administrator.publicKey) (
-          lib.attrValues secretPolicy.administrators
-        )
+        map (key: canonicalRecipient key.publicKey) administratorKeys
       )
     then
       throw "nstdl secrets host '${name}' must not use an administrator public key as its runtime hostPubkey"
@@ -117,10 +115,14 @@ let
     else
       host;
 
-  administratorIdentities = lib.mapAttrsToList (_name: administrator: {
-    identity = administrator.identity;
-    pubkey = administrator.publicKey;
-  }) secretPolicy.administrators;
+  administratorKeys = lib.concatMap (
+    administrator: lib.attrValues administrator.keys
+  ) (lib.attrValues secretPolicy.administrators);
+
+  administratorIdentities = map (key: {
+    identity = key.identity;
+    pubkey = key.publicKey;
+  }) administratorKeys;
 
   moduleFor =
     host:
@@ -192,21 +194,29 @@ in
     administrators = mkOption {
       type = types.attrsOf (
         types.submodule {
-          options = {
-            identity = mkOption {
-              type = types.coercedTo types.path toString types.nonEmptyStr;
-              default = "~/.ssh/id_ed25519";
-              description = "Local identity path used by the agenix-rekey command.";
-            };
-            publicKey = mkOption {
-              type = types.nonEmptyStr;
-              description = "Public recipient key for canonical secrets.";
-            };
+          options.keys = mkOption {
+            type = types.attrsOf (
+              types.submodule {
+                options = {
+                  identity = mkOption {
+                    type = types.coercedTo types.path toString types.nonEmptyStr;
+                    default = "~/.ssh/id_ed25519";
+                    description = "Local identity path used by the agenix-rekey command.";
+                  };
+                  publicKey = mkOption {
+                    type = types.nonEmptyStr;
+                    description = "Public recipient key for canonical secrets.";
+                  };
+                };
+              }
+            );
+            default = { };
+            description = "Named local keys owned by this administrator.";
           };
         }
       );
       default = { };
-      description = "Trusted administrators allowed to decrypt and edit canonical secrets.";
+      description = "Trusted administrators and the local keys through which they may decrypt and edit canonical secrets.";
     };
 
     recoveryRecipients = mkOption {

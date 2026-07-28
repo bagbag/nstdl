@@ -149,9 +149,15 @@ own public runtime recipient and cannot edit canonical secret files.
 ```nix
 nstdl = {
   secrets = {
-    administrators.patrick = {
-      identity = "/home/patrick/.ssh/id_ed25519";
-      publicKey = "ssh-ed25519 AAAA... patrick";
+    administrators.patrick.keys = {
+      workstation = {
+        identity = "~/.ssh/id_ed25519";
+        publicKey = "ssh-ed25519 AAAA... patrick@workstation";
+      };
+      laptop = {
+        identity = "~/.ssh/id_ed25519";
+        publicKey = "ssh-ed25519 AAAA... patrick@laptop";
+      };
     };
     recoveryRecipients = [ "age1...offline-recovery..." ];
     storage = {
