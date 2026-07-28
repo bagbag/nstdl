@@ -30,6 +30,9 @@ in
       developer-extras = { pkgs, ... }: {
         home.packages = developerExtras pkgs;
       };
+      system-utilities = { pkgs, ... }: {
+        home.packages = with pkgs; [ nano bind curl inetutils ipcalc tcpdump wget htop ];
+      };
       document-tools = { pkgs, ... }: { home.packages = with pkgs; [ typst pandoc pdfcpu poppler-utils qpdf ]; };
       office-tools = { pkgs, ... }: { home.packages = with pkgs; [ hunspell hunspellDicts.en_US hunspellDicts.de_DE hyphenDicts.en_US hyphenDicts.de_DE ]; };
       creative-media = { pkgs, ... }: { home.packages = with pkgs; [ ffmpeg gimp easyeffects ]; };

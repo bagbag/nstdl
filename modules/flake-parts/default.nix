@@ -369,7 +369,7 @@ in
                                   "workstation"
                                   "developer"
                                   "desktop-apps"
-                                  "javascript-development" "python-development" "native-development" "database-client" "developer-extras" "office-tools" "document-tools" "creative-media" "remote-desktop" "messaging" "syncthing" "gnome-extras" "vscode" "ai-agent-tools" "secret-admin" "full-stack-developer"
+                                  "javascript-development" "python-development" "native-development" "database-client" "developer-extras" "system-utilities" "office-tools" "document-tools" "creative-media" "remote-desktop" "messaging" "syncthing" "gnome-extras" "vscode" "ai-agent-tools" "secret-admin" "full-stack-developer"
                                 ]
                               );
                               default = [ ];
@@ -417,7 +417,7 @@ in
                   "workstation"
                   "developer"
                   "desktop-apps"
-                  "javascript-development" "python-development" "native-development" "database-client" "developer-extras" "office-tools" "document-tools" "creative-media" "remote-desktop" "messaging" "syncthing" "gnome-extras" "vscode" "ai-agent-tools" "secret-admin" "full-stack-developer"
+                  "javascript-development" "python-development" "native-development" "database-client" "developer-extras" "system-utilities" "office-tools" "document-tools" "creative-media" "remote-desktop" "messaging" "syncthing" "gnome-extras" "vscode" "ai-agent-tools" "secret-admin" "full-stack-developer"
                 ]
               );
               default = [ ];
