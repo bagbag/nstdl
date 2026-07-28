@@ -1,4 +1,10 @@
 { inputs }:
+let
+  developerExtras = pkgs:
+    with pkgs;
+    [ aria2 bc graphviz libpst repomix d2 openssl unzip ]
+    ++ pkgs.lib.optionals (pkgs.stdenv.hostPlatform.system == "x86_64-linux" || pkgs.stdenv.hostPlatform.system == "aarch64-linux") [ e2fsprogs iotop nmon wl-clipboard-rs iputils ];
+in
 {
   config.nstdl.profiles = {
     nixos = {
@@ -18,9 +24,7 @@
       native-development = { pkgs, ... }: { home.packages = with pkgs; [ rustup gcc ]; };
       database-client = { pkgs, ... }: { home.packages = with pkgs; [ postgresql_18 dbeaver-bin ]; };
       developer-extras = { pkgs, ... }: {
-        home.packages = with pkgs;
-          [ aria2 bc graphviz libpst repomix d2 openssl unzip ]
-          ++ pkgs.lib.optionals stdenv.isLinux [ e2fsprogs iotop nmon wl-clipboard-rs iputils ];
+        home.packages = developerExtras pkgs;
       };
       office-tools = { pkgs, ... }: { home.packages = with pkgs; [ libreoffice-fresh hunspell hunspellDicts.en_US hunspellDicts.de_DE hyphenDicts.en_US hyphenDicts.de_DE typst pandoc pdfcpu poppler-utils qpdf ]; };
       creative-media = { pkgs, ... }: { home.packages = with pkgs; [ ffmpeg gimp easyeffects ]; };
@@ -57,7 +61,9 @@
           diff-gen
         ]; };
       full-stack-developer = { pkgs, ... }: {
-        home.packages = with pkgs; [ nodejs_26 pnpm bun deno typescript-language-server oxlint oxfmt python3 rustup gcc postgresql_18 dbeaver-bin aria2 graphviz libpst repomix d2 iotop nmon wl-clipboard-rs iputils ];
+        home.packages = with pkgs;
+          [ nodejs_26 pnpm bun deno typescript-language-server oxlint oxfmt python3 rustup gcc postgresql_18 dbeaver-bin ]
+          ++ developerExtras pkgs;
       };
     };
   };
