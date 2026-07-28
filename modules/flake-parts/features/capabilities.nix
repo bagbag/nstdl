@@ -30,6 +30,7 @@ in
       creative-media = { pkgs, ... }: { home.packages = with pkgs; [ ffmpeg gimp easyeffects ]; };
       remote-desktop = { pkgs, ... }: { home.packages = with pkgs; [ rclone remmina rustdesk-flutter ]; };
       messaging = { pkgs, ... }: { home.packages = [ pkgs.signal-desktop ]; };
+      syncthing = { ... }: { services.syncthing.enable = true; };
       gnome-extras = { pkgs, ... }: { home.packages = with pkgs; [ gnome-tweaks keepassxc gnome-disk-utility dconf-editor devhelp gnome-builder gnomeExtensions.appindicator gnomeExtensions.launch-new-instance gnomeExtensions.status-icons gnomeExtensions.uptime-kuma-indicator htop usbutils ]; };
       vscode = { ... }: { programs.vscode.enable = true; };
       ai-agent-tools = { pkgs, ... }: { home.packages = [ pkgs.claude-code ]; };

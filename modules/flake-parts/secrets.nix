@@ -47,11 +47,6 @@ let
   validateHostAccess =
     name: host:
     if
-      host.platform != "nixos"
-      && lib.any (secret: secret.access ? ${host.name}) (lib.attrValues secretPolicy.items)
-    then
-      throw "nstdl secret runtime ACLs are supported only for NixOS hosts"
-    else if
       !hasFeature "secrets" host
       && lib.any (secret: secret.access ? ${host.name}) (lib.attrValues secretPolicy.items)
     then
@@ -175,6 +170,10 @@ let
           {
             assertion = duplicateSecretGroupNames == [ ];
             message = "nstdl secrets host '${host.name}' has colliding generated secret groups";
+          }
+          {
+            assertion = host.platform == "nixos" || lib.all (secret: secret.access.${host.name}.users == [ ]) (lib.attrValues runtimeSecrets);
+            message = "nstdl secrets Darwin host '${host.name}' supports owner and mode ACLs, not Unix group users";
           }
           {
             assertion = config.age.rekey.masterIdentities == administratorIdentities;
