@@ -40,9 +40,15 @@
           "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPpPhXfy+OmQXWkjhFxn68tDs+++MTXzpSgMS3iM5gwN alice"
         ];
         secrets = {
-          administrators.fixture.keys.test = {
-            identity = "/tmp/test-master-age-key";
-            publicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMM/o1cLFjnD1m41DE41yWySYzOjvN7MizVJLIpbhbXN";
+          administrators.fixture.keys = {
+            primary = {
+              identity = "/tmp/test-master-age-key";
+              publicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMM/o1cLFjnD1m41DE41yWySYzOjvN7MizVJLIpbhbXN";
+            };
+            secondary = {
+              identity = "/tmp/test-master-age-key";
+              publicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICvnCyc7hK0Tb5bXujzcjF+FjpmGi4FnfD9y84RtU6ZQ fixture-secondary";
+            };
           };
           recoveryRecipients = [ "age1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs3290gq" ];
           items.database-password = {

@@ -150,6 +150,8 @@ rm -f "${postgresql_invalid_output}"
 nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-secrets.config.system.build.toplevel.drvPath"
 nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-secrets.config.age.rekey.hostPubkey"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-secrets.config.age.rekey.extraEncryptionPubkeys"
+master_identity_count="$(nix eval "${override[@]}" --raw --apply 'identities: builtins.toString (builtins.length identities)' "${fixture}#nixosConfigurations.test-secrets.config.age.rekey.masterIdentities")"
+[[ "${master_identity_count}" == "2" ]]
 nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-secrets.config.age.rekey.localStorageDir"
 password_hash_file="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-secrets.config.users.users.admin.hashedPasswordFile")"
 agenix_password_hash_file="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-secrets.config.age.secrets.database-password.path")"
