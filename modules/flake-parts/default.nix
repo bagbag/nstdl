@@ -46,6 +46,7 @@ let
     {
       home-manager.users = lib.mapAttrs (name: user: {
         imports = homeModulesFor user.home.features;
+        _module.args.nstdlLocale = host.locale;
         home = {
           username = name;
           homeDirectory =
@@ -74,6 +75,7 @@ let
     }
     // lib.optionalAttrs (host.platform == "nixos") {
       virtualization = host.virtualization;
+      locale = host.locale;
     }
     //
       lib.optionalAttrs
@@ -300,6 +302,35 @@ in
                 type = types.nullOr types.str;
                 default = null;
                 description = "Optional network domain.";
+              };
+              locale = {
+                language = mkOption {
+                  type = types.str;
+                  default = "en_US.UTF-8";
+                  description = "Locale used for messages and the default language.";
+                };
+                format = mkOption {
+                  type = types.str;
+                  default = "de_DE.UTF-8";
+                  description = "Locale used for regional formatting such as dates, numbers, and paper size.";
+                };
+                consoleKeyMap = mkOption {
+                  type = types.str;
+                  default = "de-latin1-nodeadkeys";
+                  description = "Linux virtual-console keymap.";
+                };
+                keyboard = {
+                  layout = mkOption {
+                    type = types.str;
+                    default = "de";
+                    description = "Graphical keyboard layout for NixOS workstations.";
+                  };
+                  variant = mkOption {
+                    type = types.str;
+                    default = "nodeadkeys";
+                    description = "Graphical keyboard variant for NixOS workstations.";
+                  };
+                };
               };
               virtualization = mkOption {
                 type = types.enum [

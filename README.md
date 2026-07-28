@@ -219,6 +219,11 @@ accounts, and optional root break-glass access.
   one-off client wrappers.
 - `secrets`: ragenix plus agenix-rekey, with explicit host runtime ACLs.
 
+NixOS hosts use an explicit locale policy. Its defaults are English messages,
+German regional formatting, and the German `nodeadkeys` keyboard layout across
+the console, display manager, and GNOME session. Override `hosts.<name>.locale`
+when a host needs different language, formatting, or keyboard conventions.
+
 nstdl is consumed through its flake-parts module. Direct NixOS, nix-darwin, and
 Home Manager module composition is intentionally not a supported API.
 

@@ -1,4 +1,21 @@
-{ lib, pkgs, ... }:
+{
+  lib,
+  nstdlLocale ? null,
+  pkgs,
+  ...
+}:
+let
+  locale =
+    if nstdlLocale == null then
+      {
+        keyboard = {
+          layout = "de";
+          variant = "nodeadkeys";
+        };
+      }
+    else
+      nstdlLocale;
+in
 {
   programs.ghostty = {
     enable = true;
@@ -50,7 +67,7 @@
     "org/gnome/desktop/input-sources".sources = [
       (lib.gvariant.mkTuple [
         "xkb"
-        "de+nodeadkeys"
+        "${locale.keyboard.layout}+${locale.keyboard.variant}"
       ])
     ];
 

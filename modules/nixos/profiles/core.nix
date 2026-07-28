@@ -30,6 +30,36 @@ in
       description = "Virtualization guest environment whose agent nstdl enables.";
     };
 
+    locale = {
+      language = lib.mkOption {
+        type = lib.types.str;
+        default = "en_US.UTF-8";
+        description = "Locale used for messages and the default language.";
+      };
+      format = lib.mkOption {
+        type = lib.types.str;
+        default = "de_DE.UTF-8";
+        description = "Locale used for regional formatting such as dates, numbers, and paper size.";
+      };
+      consoleKeyMap = lib.mkOption {
+        type = lib.types.str;
+        default = "de-latin1-nodeadkeys";
+        description = "Linux virtual-console keymap.";
+      };
+      keyboard = {
+        layout = lib.mkOption {
+          type = lib.types.str;
+          default = "de";
+          description = "Graphical keyboard layout for NixOS workstations.";
+        };
+        variant = lib.mkOption {
+          type = lib.types.str;
+          default = "nodeadkeys";
+          description = "Graphical keyboard variant for NixOS workstations.";
+        };
+      };
+    };
+
     user = {
       name = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
@@ -103,18 +133,43 @@ in
       allowPing = lib.mkDefault true;
     };
 
-    boot.loader.systemd-boot.enable = lib.mkDefault true;
+    boot.loader.systemd-boot = {
+      enable = lib.mkDefault true;
+      configurationLimit = lib.mkDefault 10;
+      consoleMode = lib.mkDefault "max";
+    };
     boot.loader.efi.canTouchEfiVariables = lib.mkDefault true;
-    boot.tmp.useTmpfs = lib.mkDefault true;
+    boot.tmp = {
+      useTmpfs = lib.mkDefault true;
+      tmpfsHugeMemoryPages = lib.mkDefault "within_size";
+    };
     zramSwap.enable = lib.mkDefault true;
 
     services.qemuGuest.enable = cfg.virtualization == "qemu";
     virtualisation.vmware.guest.enable = cfg.virtualization == "vmware";
 
     time.timeZone = lib.mkDefault "Europe/Berlin";
-    i18n.defaultLocale = lib.mkDefault "en_US.UTF-8";
+    i18n = {
+      defaultLocale = cfg.locale.language;
+      extraLocales = [
+        "${cfg.locale.language}/UTF-8"
+        "${cfg.locale.format}/UTF-8"
+      ];
+      extraLocaleSettings = {
+        LC_MESSAGES = cfg.locale.language;
+        LC_ADDRESS = cfg.locale.format;
+        LC_IDENTIFICATION = cfg.locale.format;
+        LC_MEASUREMENT = cfg.locale.format;
+        LC_MONETARY = cfg.locale.format;
+        LC_NAME = cfg.locale.format;
+        LC_NUMERIC = cfg.locale.format;
+        LC_PAPER = cfg.locale.format;
+        LC_TELEPHONE = cfg.locale.format;
+        LC_TIME = cfg.locale.format;
+      };
+    };
     console = {
-      keyMap = lib.mkDefault "de-latin1-nodeadkeys";
+      keyMap = cfg.locale.consoleKeyMap;
       packages = [ pkgs.terminus_font ];
       font = "${pkgs.terminus_font}/share/consolefonts/ter-v24b.psf.gz";
     };

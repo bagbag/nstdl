@@ -79,6 +79,13 @@ workstation_nh_clean_args="$(nix eval "${override[@]}" --raw "${fixture}#nixosCo
 workstation_gc_automatic="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.nix.gc.automatic")"
 workstation_optimise_automatic="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.nix.optimise.automatic")"
 workstation_trusted_users="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.nix.settings.trusted-users")"
+workstation_console_mode="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-workstation.config.boot.loader.systemd-boot.consoleMode")"
+workstation_boot_limit="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.boot.loader.systemd-boot.configurationLimit")"
+workstation_tmp_huge_pages="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-workstation.config.boot.tmp.tmpfsHugeMemoryPages")"
+workstation_xkb_layout="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-workstation.config.services.xserver.xkb.layout")"
+workstation_xkb_variant="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-workstation.config.services.xserver.xkb.variant")"
+workstation_locale_format="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-workstation.config.i18n.extraLocaleSettings.LC_TIME")"
+workstation_ozone="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.tester.home.sessionVariables.NIXOS_OZONE_WL")"
 workstation_home_packages="$(nix eval "${override[@]}" --json --apply 'packages: builtins.map (package: package.name) packages' "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.tester.home.packages")"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.nix.settings.substituters"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.nix.gc.automatic"
@@ -86,6 +93,7 @@ nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstatio
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.programs.thunderbird.enable"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.tester.services.flatpak.update.auto"
 [[ "${qemu_guest_enabled}" == "true" && "${vmware_guest_enabled}" == "true" && "${workstation_ssh_enabled}" == "true" && "${workstation_ssh_password_auth}" == "false" && "${workstation_podman_enabled}" == "true" && "${workstation_podman_search_registries}" == '["docker.io","quay.io"]' && "${workstation_podman_policy}" == *'"default":[{"type":"reject"}]'* && "${workstation_podman_policy}" == *'"docker.io":[{"type":"insecureAcceptAnything"}]'* && "${workstation_podman_policy}" == *'"quay.io":[{"type":"insecureAcceptAnything"}]'* && "${workstation_podman_policy}" == *'"docker-daemon":{"":['* && "${workstation_nh_enabled}" == "true" && "${workstation_nh_clean_enabled}" == "true" && "${workstation_nh_clean_args}" == "--keep 5 --keep-since 14d --optimise" && "${workstation_gc_automatic}" == "false" && "${workstation_optimise_automatic}" == "false" && "${workstation_trusted_users}" == *'"tester"'* ]]
+[[ "${workstation_console_mode}" == "max" && "${workstation_boot_limit}" == "10" && "${workstation_tmp_huge_pages}" == "within_size" && "${workstation_xkb_layout}" == "de" && "${workstation_xkb_variant}" == "nodeadkeys" && "${workstation_locale_format}" == "de_DE.UTF-8" && "${workstation_ozone}" == "1" ]]
 [[ "${workstation_home_packages}" == *'bc-'* && "${workstation_home_packages}" == *'e2fsprogs-'* && "${workstation_home_packages}" == *'openssl-'* && "${workstation_home_packages}" == *'unzip-'* && "${workstation_home_packages}" != *'dbeaver-bin'* && "${workstation_home_packages}" != *'ragenix-'* && "${workstation_home_packages}" != *'sysprof-'* ]]
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.services.postgresql.ensureDatabases"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.services.postgresql.ensureUsers"

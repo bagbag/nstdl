@@ -1,5 +1,9 @@
 { lib, pkgs, ... }:
 {
+  home.sessionVariables = lib.mkIf pkgs.stdenv.isLinux {
+    NIXOS_OZONE_WL = "1";
+  };
+
   programs.chromium = lib.mkIf pkgs.stdenv.isLinux {
     enable = true;
     package = pkgs.ungoogled-chromium;
@@ -13,6 +17,9 @@
     enable = true;
     package = pkgs.mpv.override {
       scripts = with pkgs.mpvScripts; [ uosc ];
+      mpv-unwrapped = pkgs.mpv-unwrapped.override {
+        waylandSupport = pkgs.stdenv.isLinux;
+      };
     };
     config = {
       profile = "high-quality";

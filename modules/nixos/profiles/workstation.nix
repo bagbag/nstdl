@@ -19,6 +19,11 @@ in
 
   networking.networkmanager.enable = true;
 
+  services.xserver.xkb = {
+    layout = config.nstdl.locale.keyboard.layout;
+    variant = config.nstdl.locale.keyboard.variant;
+  };
+
   users.users = lib.mkIf (userName != null) {
     ${userName}.extraGroups = [
       "networkmanager"
