@@ -212,6 +212,8 @@ accounts, and optional root break-glass access.
   with `podman machine init` and `podman machine start`.
 - `remote-access`: OpenSSH with firewall integration, disabled password and
   keyboard-interactive authentication, and key-only root break-glass support.
+- `intel`: Intel microcode, iHD VA-API, compute/NPU support, and active
+  Intel P-state; `laptop` adds auto-cpufreq and thermald.
 - `postgresql`: typed PostgreSQL roles, databases, memberships, extensions, and
   local dump backups. Role passwords use runtime files loaded as systemd
   credentials, so their contents cannot enter nstdl's Nix configuration.

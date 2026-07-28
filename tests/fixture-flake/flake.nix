@@ -113,6 +113,8 @@
               "desktop-apps"
               "podman"
               "remote-access"
+              "intel"
+              "laptop"
             ];
             systemStateVersion = "25.11";
             accounts = {

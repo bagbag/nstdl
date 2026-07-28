@@ -209,6 +209,7 @@ in
     ./features/postgresql.nix
     ./features/proxmox-backup.nix
     ./features/remote-access.nix
+    ./features/hardware.nix
     (import ./features/capabilities.nix { inherit inputs; })
     ./storage.nix
     ./network.nix
@@ -287,7 +288,13 @@ in
                     "proxmox-backup"
                     "remote-access"
                     "secrets"
-                    "foreign-binaries" "container-development" "remote-desktop" "full-stack-developer" "office-suite"
+                    "intel"
+                    "laptop"
+                    "foreign-binaries"
+                    "container-development"
+                    "remote-desktop"
+                    "full-stack-developer"
+                    "office-suite"
                   ]
                 );
                 default = [ ];
@@ -400,7 +407,23 @@ in
                                   "workstation"
                                   "developer"
                                   "desktop-apps"
-                                  "javascript-development" "python-development" "native-development" "database-client" "developer-extras" "system-utilities" "office-tools" "document-tools" "creative-media" "remote-desktop" "messaging" "syncthing" "gnome-extras" "vscode" "ai-agent-tools" "secret-admin" "full-stack-developer"
+                                  "javascript-development"
+                                  "python-development"
+                                  "native-development"
+                                  "database-client"
+                                  "developer-extras"
+                                  "system-utilities"
+                                  "office-tools"
+                                  "document-tools"
+                                  "creative-media"
+                                  "remote-desktop"
+                                  "messaging"
+                                  "syncthing"
+                                  "gnome-extras"
+                                  "vscode"
+                                  "ai-agent-tools"
+                                  "secret-admin"
+                                  "full-stack-developer"
                                 ]
                               );
                               default = [ ];
@@ -448,7 +471,23 @@ in
                   "workstation"
                   "developer"
                   "desktop-apps"
-                  "javascript-development" "python-development" "native-development" "database-client" "developer-extras" "system-utilities" "office-tools" "document-tools" "creative-media" "remote-desktop" "messaging" "syncthing" "gnome-extras" "vscode" "ai-agent-tools" "secret-admin" "full-stack-developer"
+                  "javascript-development"
+                  "python-development"
+                  "native-development"
+                  "database-client"
+                  "developer-extras"
+                  "system-utilities"
+                  "office-tools"
+                  "document-tools"
+                  "creative-media"
+                  "remote-desktop"
+                  "messaging"
+                  "syncthing"
+                  "gnome-extras"
+                  "vscode"
+                  "ai-agent-tools"
+                  "secret-admin"
+                  "full-stack-developer"
                 ]
               );
               default = [ ];
