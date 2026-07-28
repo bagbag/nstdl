@@ -14,11 +14,12 @@ server_kernel="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations
 server_systemd_boot="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-server.config.boot.loader.systemd-boot.enable")"
 server_efi_mutation="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-server.config.boot.loader.efi.canTouchEfiVariables")"
 server_zram="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-server.config.zramSwap.enable")"
+server_firmware="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-server.config.hardware.enableRedistributableFirmware")"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-server.config.security.sudo.extraRules"
 qemu_guest_enabled="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-server.config.services.qemuGuest.enable")"
 [[ "${server_allow_users}" == *'"admin"'* && "${server_allow_users}" == *'"root"'* && "${server_allow_users}" == *'"deploy"'* ]]
 [[ "${server_root_keys}" == *"alice"* ]]
-[[ "${server_kernel}" == 6.12* && "${server_systemd_boot}" == "true" && "${server_efi_mutation}" == "true" && "${server_zram}" == "true" ]]
+[[ "${server_kernel}" == 6.12* && "${server_systemd_boot}" == "true" && "${server_efi_mutation}" == "true" && "${server_zram}" == "true" && "${server_firmware}" == "true" ]]
 deploy_target="$(nix eval "${override[@]}" --raw "${fixture}#deploy.nodes.test-server.hostname")"
 deploy_user="$(nix eval "${override[@]}" --raw "${fixture}#deploy.nodes.test-server.sshUser")"
 network_addresses="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-server.config.systemd.network.networks.10-nstdl.networkConfig.Address")"
@@ -91,6 +92,7 @@ workstation_va_driver="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfig
 workstation_auto_cpufreq="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.services.auto-cpufreq.enable")"
 workstation_thermald="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.services.thermald.enable")"
 workstation_power_profiles="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.services.power-profiles-daemon.enable")"
+workstation_intel_microcode="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.hardware.cpu.intel.updateMicrocode")"
 workstation_home_packages="$(nix eval "${override[@]}" --json --apply 'packages: builtins.map (package: package.name) packages' "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.tester.home.packages")"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.nix.settings.substituters"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.nix.gc.automatic"
@@ -99,7 +101,7 @@ nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstatio
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.tester.services.flatpak.update.auto"
 [[ "${qemu_guest_enabled}" == "true" && "${vmware_guest_enabled}" == "true" && "${workstation_ssh_enabled}" == "true" && "${workstation_ssh_password_auth}" == "false" && "${workstation_podman_enabled}" == "true" && "${workstation_podman_search_registries}" == '["docker.io","quay.io"]' && "${workstation_podman_policy}" == *'"default":[{"type":"reject"}]'* && "${workstation_podman_policy}" == *'"docker.io":[{"type":"insecureAcceptAnything"}]'* && "${workstation_podman_policy}" == *'"quay.io":[{"type":"insecureAcceptAnything"}]'* && "${workstation_podman_policy}" == *'"docker-daemon":{"":['* && "${workstation_nh_enabled}" == "true" && "${workstation_nh_clean_enabled}" == "true" && "${workstation_nh_clean_args}" == "--keep 5 --keep-since 14d --optimise" && "${workstation_gc_automatic}" == "false" && "${workstation_optimise_automatic}" == "false" && "${workstation_trusted_users}" == *'"tester"'* ]]
 [[ "${workstation_console_mode}" == "max" && "${workstation_boot_limit}" == "10" && "${workstation_tmp_huge_pages}" == "within_size" && "${workstation_xkb_layout}" == "de" && "${workstation_xkb_variant}" == "nodeadkeys" && "${workstation_locale_format}" == "de_DE.UTF-8" && "${workstation_ozone}" == "1" ]]
-[[ "${workstation_intel_pstate}" == *'"intel_pstate=active"'* && "${workstation_va_driver}" == "iHD" && "${workstation_auto_cpufreq}" == "true" && "${workstation_thermald}" == "true" && "${workstation_power_profiles}" == "false" ]]
+[[ "${workstation_intel_pstate}" == *'"intel_pstate=active"'* && "${workstation_va_driver}" == "iHD" && "${workstation_auto_cpufreq}" == "true" && "${workstation_thermald}" == "true" && "${workstation_power_profiles}" == "false" && "${workstation_intel_microcode}" == "true" ]]
 [[ "${workstation_home_packages}" == *'bc-'* && "${workstation_home_packages}" == *'e2fsprogs-'* && "${workstation_home_packages}" == *'openssl-'* && "${workstation_home_packages}" == *'unzip-'* && "${workstation_home_packages}" != *'dbeaver-bin'* && "${workstation_home_packages}" != *'ragenix-'* && "${workstation_home_packages}" != *'sysprof-'* ]]
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.services.postgresql.ensureDatabases"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.services.postgresql.ensureUsers"
