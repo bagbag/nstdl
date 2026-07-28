@@ -53,25 +53,25 @@ let
       ];
       compressionCommand =
         {
-          none = "${pkgs.coreutils}/bin/cat";
-          gzip = "${pkgs.gzip}/bin/gzip -c -${toString (compressionLevel job)}";
-          zstd = "${pkgs.zstd}/bin/zstd -c -${toString (compressionLevel job)}";
+          none = "cat";
+          gzip = "gzip -c -${toString (compressionLevel job)}";
+          zstd = "zstd -c -${toString (compressionLevel job)}";
         }
         .${job.compression};
     in
     if job.kind == "database" && job.format == "custom" then
-      "${config.services.postgresql.package}/bin/pg_dump ${
+      "pg_dump ${
         lib.escapeShellArgs (pgDumpArgs ++ customCompression)
       } > \"$inProgress\""
     else
       let
         command =
           if job.kind == "database" then
-            "${config.services.postgresql.package}/bin/pg_dump ${lib.escapeShellArgs pgDumpArgs}"
+            "pg_dump ${lib.escapeShellArgs pgDumpArgs}"
           else if job.kind == "globals" then
-            "${config.services.postgresql.package}/bin/pg_dumpall --globals-only"
+            "pg_dumpall --globals-only"
           else
-            "${config.services.postgresql.package}/bin/pg_dumpall";
+            "pg_dumpall";
       in
       "${command} | ${compressionCommand} > \"$inProgress\"";
 in
@@ -248,15 +248,15 @@ in
         script = ''
           set -euo pipefail
           umask 0077
-          timestamp="$(${pkgs.coreutils}/bin/date +%Y-%m-%d-%H%M%S-%N)"
+          timestamp="$(date +%Y-%m-%d-%H%M%S-%N)"
           completed="${cfg.location}/${job.name}-$timestamp${extension job}"
           inProgress="${cfg.location}/.${job.name}.in-progress${extension job}"
-          ${pkgs.coreutils}/bin/rm -f "$inProgress"
+          rm -f "$inProgress"
           ${dumpCommand job}
-          ${pkgs.coreutils}/bin/mv --no-clobber "$inProgress" "$completed"
+          mv --no-clobber "$inProgress" "$completed"
           test ! -e "$inProgress"
           ${lib.optionalString (job.retentionDays != null) ''
-            ${pkgs.findutils}/bin/find ${lib.escapeShellArg cfg.location} -maxdepth 1 -type f -name ${lib.escapeShellArg "${job.name}-*${extension job}"} -mtime +${toString job.retentionDays} -delete
+            find ${lib.escapeShellArg cfg.location} -maxdepth 1 -type f -name ${lib.escapeShellArg "${job.name}-*${extension job}"} -mtime +${toString job.retentionDays} -delete
           ''}
         '';
         serviceConfig = {
@@ -271,6 +271,7 @@ in
           PrivateTmp = true;
           NoNewPrivileges = true;
         };
+        path = [ config.services.postgresql.package pkgs.coreutils pkgs.findutils pkgs.gzip pkgs.zstd ];
       }
     ) enabledJobs;
     systemd.timers = lib.mapAttrs' (

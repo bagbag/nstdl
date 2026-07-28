@@ -17,7 +17,11 @@
       python-development = { pkgs, ... }: { home.packages = [ pkgs.python3 ]; };
       native-development = { pkgs, ... }: { home.packages = with pkgs; [ rustup gcc ]; };
       database-client = { pkgs, ... }: { home.packages = with pkgs; [ postgresql_18 dbeaver-bin ]; };
-      developer-extras = { pkgs, ... }: { home.packages = with pkgs; [ aria2 bc e2fsprogs graphviz libpst repomix d2 iotop nmon openssl unzip wl-clipboard-rs iputils ]; };
+      developer-extras = { pkgs, ... }: {
+        home.packages = with pkgs;
+          [ aria2 bc graphviz libpst repomix d2 openssl unzip ]
+          ++ pkgs.lib.optionals stdenv.isLinux [ e2fsprogs iotop nmon wl-clipboard-rs iputils ];
+      };
       office-tools = { pkgs, ... }: { home.packages = with pkgs; [ libreoffice-fresh hunspell hunspellDicts.en_US hunspellDicts.de_DE hyphenDicts.en_US hyphenDicts.de_DE typst pandoc pdfcpu poppler-utils qpdf ]; };
       creative-media = { pkgs, ... }: { home.packages = with pkgs; [ ffmpeg gimp easyeffects ]; };
       remote-desktop = { pkgs, ... }: { home.packages = with pkgs; [ rclone remmina rustdesk-flutter ]; };
