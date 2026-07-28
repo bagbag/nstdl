@@ -2,12 +2,13 @@
 let
   developerExtras = pkgs:
     with pkgs;
-    [ aria2 bc graphviz libpst repomix d2 openssl unzip ]
-    ++ pkgs.lib.optionals (pkgs.stdenv.hostPlatform.system == "x86_64-linux" || pkgs.stdenv.hostPlatform.system == "aarch64-linux") [ e2fsprogs iotop nmon wl-clipboard-rs iputils ];
+    [ aria2 bc graphviz libpst repomix openssl unzip ]
+    ++ pkgs.lib.optionals (pkgs.stdenv.hostPlatform.system == "x86_64-linux" || pkgs.stdenv.hostPlatform.system == "aarch64-linux") [ d2 e2fsprogs iotop nmon wl-clipboard-rs iputils ];
 in
 {
   config.nstdl.profiles = {
     nixos = {
+      office-suite = { pkgs, ... }: { environment.systemPackages = [ pkgs.libreoffice-fresh ]; };
       foreign-binaries = { programs.nix-ld.enable = true; };
       container-development = { pkgs, ... }: { environment.systemPackages = [ pkgs.podman-compose ]; };
       remote-desktop = { pkgs, ... }: {
@@ -18,6 +19,9 @@ in
         environment.systemPackages = [ pkgs.podman-compose ];
       };
     };
+    darwin.office-suite = {
+      homebrew.casks = [ "libreoffice" ];
+    };
     home = {
       javascript-development = { pkgs, ... }: { home.packages = with pkgs; [ nodejs_26 pnpm bun deno typescript-language-server oxlint oxfmt ]; };
       python-development = { pkgs, ... }: { home.packages = [ pkgs.python3 ]; };
@@ -26,11 +30,20 @@ in
       developer-extras = { pkgs, ... }: {
         home.packages = developerExtras pkgs;
       };
-      office-tools = { pkgs, ... }: { home.packages = with pkgs; [ libreoffice-fresh hunspell hunspellDicts.en_US hunspellDicts.de_DE hyphenDicts.en_US hyphenDicts.de_DE typst pandoc pdfcpu poppler-utils qpdf ]; };
+      document-tools = { pkgs, ... }: { home.packages = with pkgs; [ typst pandoc pdfcpu poppler-utils qpdf ]; };
+      office-tools = { pkgs, ... }: { home.packages = with pkgs; [ hunspell hunspellDicts.en_US hunspellDicts.de_DE hyphenDicts.en_US hyphenDicts.de_DE ]; };
       creative-media = { pkgs, ... }: { home.packages = with pkgs; [ ffmpeg gimp easyeffects ]; };
       remote-desktop = { pkgs, ... }: { home.packages = with pkgs; [ rclone remmina rustdesk-flutter ]; };
-      messaging = { pkgs, ... }: { home.packages = [ pkgs.signal-desktop ]; };
-      syncthing = { ... }: { services.syncthing.enable = true; };
+      messaging = { pkgs, ... }: {
+        home.packages = pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.signal-desktop ];
+      };
+      syncthing = { lib, pkgs, ... }: {
+        services.syncthing = {
+          enable = true;
+          overrideDevices = lib.mkIf pkgs.stdenv.isDarwin false;
+          overrideFolders = lib.mkIf pkgs.stdenv.isDarwin false;
+        };
+      };
       gnome-extras = { pkgs, ... }: { home.packages = with pkgs; [ gnome-tweaks keepassxc gnome-disk-utility dconf-editor devhelp gnome-builder gnomeExtensions.appindicator gnomeExtensions.launch-new-instance gnomeExtensions.status-icons gnomeExtensions.uptime-kuma-indicator htop usbutils ]; };
       vscode = { ... }: { programs.vscode.enable = true; };
       ai-agent-tools = { pkgs, ... }: { home.packages = [ pkgs.claude-code ]; };
@@ -63,7 +76,8 @@ in
         ]; };
       full-stack-developer = { pkgs, ... }: {
         home.packages = with pkgs;
-          [ nodejs_26 pnpm bun deno typescript-language-server oxlint oxfmt python3 rustup gcc postgresql_18 dbeaver-bin ]
+          [ nodejs_26 pnpm bun deno typescript-language-server oxlint oxfmt python3 rustup gcc postgresql_18 ]
+          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ dbeaver-bin d2 ]
           ++ developerExtras pkgs;
       };
     };
