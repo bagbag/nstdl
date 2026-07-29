@@ -113,6 +113,7 @@
               "desktop-apps"
               "podman"
               "remote-access"
+              "full-stack-developer"
               "intel"
               "laptop"
             ];
@@ -129,6 +130,7 @@
                     "developer"
                     "developer-extras"
                     "desktop-apps"
+                    "full-stack-developer"
                     "gnome-extras"
                   ];
                 };

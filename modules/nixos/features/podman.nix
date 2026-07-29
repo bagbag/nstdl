@@ -2,7 +2,7 @@
   virtualisation = {
     containers = {
       enable = true;
-      registries.settings.registries.search.registries = [
+      registries.search = [
         "docker.io"
         "quay.io"
       ];

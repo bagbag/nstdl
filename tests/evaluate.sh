@@ -72,7 +72,7 @@ vmware_guest_enabled="$(nix eval "${override[@]}" --json "${fixture}#nixosConfig
 workstation_ssh_enabled="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.services.openssh.enable")"
 workstation_ssh_password_auth="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.services.openssh.settings.PasswordAuthentication")"
 workstation_podman_enabled="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.virtualisation.podman.enable")"
-workstation_podman_search_registries="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.virtualisation.containers.registries.settings.registries.search.registries")"
+workstation_podman_search_registries="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.virtualisation.containers.registries.search")"
 workstation_podman_policy="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.virtualisation.containers.policy")"
 workstation_nh_enabled="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.programs.nh.enable")"
 workstation_nh_clean_enabled="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.programs.nh.clean.enable")"
@@ -94,6 +94,7 @@ workstation_thermald="$(nix eval "${override[@]}" --json "${fixture}#nixosConfig
 workstation_power_profiles="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.services.power-profiles-daemon.enable")"
 workstation_intel_microcode="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.hardware.cpu.intel.updateMicrocode")"
 workstation_home_packages="$(nix eval "${override[@]}" --json --apply 'packages: builtins.map (package: package.name) packages' "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.tester.home.packages")"
+workstation_system_packages="$(nix eval "${override[@]}" --json --apply 'packages: builtins.map (package: package.name) packages' "${fixture}#nixosConfigurations.test-workstation.config.environment.systemPackages")"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.nix.settings.substituters"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.nix.gc.automatic"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.programs.firefox.enable"
@@ -103,6 +104,7 @@ nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstatio
 [[ "${workstation_console_mode}" == "max" && "${workstation_boot_limit}" == "10" && "${workstation_tmp_huge_pages}" == "within_size" && "${workstation_xkb_layout}" == "de" && "${workstation_xkb_variant}" == "nodeadkeys" && "${workstation_locale_format}" == "de_DE.UTF-8" && "${workstation_ozone}" == "1" ]]
 [[ "${workstation_intel_pstate}" == *'"intel_pstate=active"'* && "${workstation_va_driver}" == "iHD" && "${workstation_auto_cpufreq}" == "true" && "${workstation_thermald}" == "true" && "${workstation_power_profiles}" == "false" && "${workstation_intel_microcode}" == "true" ]]
 [[ "${workstation_home_packages}" == *'bc-'* && "${workstation_home_packages}" == *'e2fsprogs-'* && "${workstation_home_packages}" == *'openssl-'* && "${workstation_home_packages}" == *'unzip-'* && "${workstation_home_packages}" != *'dbeaver-bin'* && "${workstation_home_packages}" != *'ragenix-'* && "${workstation_home_packages}" != *'sysprof-'* ]]
+[[ "${workstation_system_packages}" == *'nodejs-'* && "${workstation_system_packages}" == *'oxlint-'* && "${workstation_system_packages}" == *'typst-'* && "${workstation_system_packages}" == *'pandoc-'* ]]
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.services.postgresql.ensureDatabases"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.services.postgresql.ensureUsers"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.systemd.timers.nstdl-postgresql-backup-app.timerConfig"
