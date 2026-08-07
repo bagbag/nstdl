@@ -295,6 +295,7 @@ in
                     "remote-desktop"
                     "full-stack-developer"
                     "office-suite"
+                    "ai-agent-tools"
                   ]
                 );
                 default = [ ];

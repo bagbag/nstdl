@@ -47,6 +47,7 @@ in
   config.nstdl.profiles = {
     nixos = {
       office-suite = { pkgs, ... }: { environment.systemPackages = [ pkgs.libreoffice-fresh ]; };
+      ai-agent-tools = { };
       foreign-binaries = {
         programs.nix-ld.enable = true;
       };
@@ -61,6 +62,14 @@ in
     };
     darwin.office-suite = {
       homebrew.casks = [ "libreoffice" ];
+    };
+    darwin.ai-agent-tools = {
+      homebrew.casks = [
+        "codex"
+        "claude-code"
+        "claude"
+        "chatgpt"
+      ];
     };
     home = {
       javascript-development = { pkgs, ... }: {
@@ -161,7 +170,12 @@ in
         ];
       };
       vscode = { ... }: { programs.vscode.enable = true; };
-      ai-agent-tools = { pkgs, ... }: { home.packages = [ pkgs.claude-code ]; };
+      ai-agent-tools = { pkgs, ... }: {
+        home.packages = pkgs.lib.optionals pkgs.stdenv.isLinux [
+          pkgs.codex
+          pkgs.claude-code
+        ];
+      };
       secret-admin =
         { pkgs, ... }:
         let
