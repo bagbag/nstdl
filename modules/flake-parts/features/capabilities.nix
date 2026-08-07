@@ -165,12 +165,17 @@ in
         ];
       };
       vscode = { ... }: { programs.vscode.enable = true; };
-      ai-agent-tools = { pkgs, ... }: {
-        home.packages = pkgs.lib.optionals pkgs.stdenv.isLinux [
-          pkgs.codex
-          pkgs.claude-code
-        ];
-      };
+      ai-agent-tools =
+        { lib, pkgs, ... }:
+        {
+          home.packages = pkgs.lib.optionals pkgs.stdenv.isLinux [
+            pkgs.codex
+            pkgs.claude-code
+          ];
+          home.sessionPath = lib.optionals pkgs.stdenv.isDarwin [
+            (if pkgs.stdenv.hostPlatform.system == "aarch64-darwin" then "/opt/homebrew/bin" else "/usr/local/bin")
+          ];
+        };
       secret-admin =
         { pkgs, ... }:
         let
