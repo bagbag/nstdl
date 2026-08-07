@@ -1,6 +1,6 @@
 { inputs }:
 let
-  fullStackTools =
+  javascriptTools =
     pkgs: with pkgs; [
       nodejs_26
       pnpm
@@ -8,13 +8,26 @@ let
       deno
       typescript-language-server
       oxlint
-      oxfmt
-      python3
+    ];
+
+  nativeDevelopmentTools =
+    pkgs: with pkgs; [
       rustup
       gcc
+    ];
+
+  documentAuthoringTools =
+    pkgs: with pkgs; [
       typst
       pandoc
     ];
+
+  fullStackTools =
+    pkgs:
+    javascriptTools pkgs
+    ++ [ pkgs.python3 ]
+    ++ nativeDevelopmentTools pkgs
+    ++ documentAuthoringTools pkgs;
 
   developerExtras =
     pkgs:
@@ -72,24 +85,9 @@ in
       ];
     };
     home = {
-      javascript-development = { pkgs, ... }: {
-        home.packages = with pkgs; [
-          nodejs_26
-          pnpm
-          bun
-          deno
-          typescript-language-server
-          oxlint
-          oxfmt
-        ];
-      };
+      javascript-development = { pkgs, ... }: { home.packages = javascriptTools pkgs; };
       python-development = { pkgs, ... }: { home.packages = [ pkgs.python3 ]; };
-      native-development = { pkgs, ... }: {
-        home.packages = with pkgs; [
-          rustup
-          gcc
-        ];
-      };
+      native-development = { pkgs, ... }: { home.packages = nativeDevelopmentTools pkgs; };
       database-client = { pkgs, ... }: {
         home.packages = with pkgs; [
           postgresql_18
@@ -112,13 +110,11 @@ in
         ];
       };
       document-tools = { pkgs, ... }: {
-        home.packages = with pkgs; [
-          typst
-          pandoc
+        home.packages = documentAuthoringTools pkgs ++ (with pkgs; [
           pdfcpu
           poppler-utils
           qpdf
-        ];
+        ]);
       };
       office-tools = { pkgs, ... }: {
         home.packages = with pkgs; [
@@ -165,7 +161,6 @@ in
           gnomeExtensions.launch-new-instance
           gnomeExtensions.status-icons
           gnomeExtensions.uptime-kuma-indicator
-          htop
           usbutils
         ];
       };
