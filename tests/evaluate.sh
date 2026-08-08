@@ -119,7 +119,7 @@ postgresql_reconcile_credentials="$(nix eval "${override[@]}" --json "${fixture}
 postgresql_reconcile_wanted_by="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-reconcile.wantedBy")"
 postgresql_backup_after="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-backup-app.after")"
 [[ "${postgresql_backup_script}" == *"pg_dump"* && "${postgresql_backup_script}" == *"--format=custom"* && "${postgresql_backup_script}" == *"--compress=zstd:10"* && "${postgresql_backup_script}" == *"-mtime +14"* ]]
-[[ "${postgresql_plain_script}" == *"pg_dump"* && "${postgresql_plain_script}" == *"--create"* && "${postgresql_plain_script}" == *"--compress=0"* && "${postgresql_plain_script}" == *"%Y-%m-%d-%H%M%S-%N"* && "${postgresql_plain_script}" == *"mv --no-clobber"* ]]
+[[ "${postgresql_plain_script}" == *"pg_dump"* && "${postgresql_plain_script}" == *"--create"* && "${postgresql_plain_script}" == *"| cat >"* && "${postgresql_plain_script}" != *"--compress="* && "${postgresql_plain_script}" == *"%Y-%m-%d-%H%M%S-%N"* && "${postgresql_plain_script}" == *"mv --no-clobber"* ]]
 [[ "${postgresql_globals_script}" == *"pg_dumpall --globals-only"* && "${postgresql_globals_script}" == *"gzip -c -6"* ]]
 [[ "${postgresql_backup_target}" == *"nstdl-postgresql-backup-app.service"* && "${postgresql_backup_target}" == *"nstdl-postgresql-backup-app_plain.service"* && "${postgresql_backup_target}" == *"nstdl-postgresql-backup-globals.service"* ]]
 [[ "${postgresql_reconcile_script}" == *"GRANT \"app_readers\" TO \"app\""* && "${postgresql_reconcile_script}" == *"CREATE EXTENSION IF NOT EXISTS \"pgcrypto\""* ]]
@@ -138,6 +138,7 @@ if nix eval --impure --expr "
       {
         services.nstdl.postgresql = {
           enable = true;
+          backup.enable = true;
           backup.jobs.cluster = {
             kind = \"cluster\";
             format = \"custom\";
