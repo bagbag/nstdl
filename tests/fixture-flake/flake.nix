@@ -340,6 +340,7 @@
               "developer"
               "desktop-apps"
               "podman"
+              "sleepless"
               "secrets"
               "ai-agent-tools"
             ];

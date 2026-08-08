@@ -209,6 +209,7 @@ in
     ./features/postgresql.nix
     ./features/proxmox-backup.nix
     ./features/remote-access.nix
+    (import ./features/sleepless.nix { inherit inputs; })
     ./features/hardware.nix
     (import ./features/capabilities.nix { inherit inputs; })
     ./storage.nix
@@ -288,6 +289,7 @@ in
                     "proxmox-backup"
                     "remote-access"
                     "secrets"
+                    "sleepless"
                     "intel"
                     "laptop"
                     "foreign-binaries"

@@ -215,6 +215,10 @@ accounts, and optional root break-glass access.
   with `podman machine init` and `podman machine start`.
 - `remote-access`: OpenSSH with firewall integration, disabled password and
   keyboard-interactive authentication, and key-only root break-glass support.
+- `sleepless`: on Darwin, builds the pinned Sleepless fork from source, installs
+  its app bundle through nix-darwin, and grants the primary user only the two
+  exact `pmset disablesleep` commands the app needs. Its interactive grant and
+  uninstall scripts are not included in the installed bundle.
 - `intel`: Intel microcode, iHD VA-API, compute/NPU support, and active
   Intel P-state; `laptop` adds auto-cpufreq and thermald.
 - `postgresql`: typed PostgreSQL roles, databases, memberships, extensions, and

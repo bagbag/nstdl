@@ -45,6 +45,11 @@
       url = "github:nix-darwin/nix-darwin";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    sleepless = {
+      url = "github:bagbag/Sleepless";
+      flake = false;
+    };
   };
 
   outputs =

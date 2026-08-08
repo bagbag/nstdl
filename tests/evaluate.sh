@@ -383,8 +383,9 @@ nix eval "${override[@]}" --raw "${fixture}#darwinConfigurations.test-darwin.con
 darwin_casks="$(nix eval "${override[@]}" --json --apply 'casks: builtins.map (cask: cask.name) casks' "${fixture}#darwinConfigurations.test-darwin.config.homebrew.casks")"
 nix eval "${override[@]}" --json "${fixture}#darwinConfigurations.test-darwin.config.nix.gc.automatic"
 darwin_podman_packages="$(nix eval "${override[@]}" --json --apply 'packages: builtins.map (package: package.name) packages' "${fixture}#darwinConfigurations.test-darwin.config.environment.systemPackages")"
+darwin_sudo_extra_config="$(nix eval "${override[@]}" --raw "${fixture}#darwinConfigurations.test-darwin.config.security.sudo.extraConfig")"
 darwin_home_packages="$(nix eval "${override[@]}" --json --apply 'packages: builtins.map (package: package.name) packages' "${fixture}#darwinConfigurations.test-darwin.config.home-manager.users.tester.home.packages")"
-[[ "${darwin_podman_packages}" == *'"podman-'* && "${darwin_podman_packages}" == *'"podman-compose-'* && "${darwin_casks}" == *'"codex"'* && "${darwin_casks}" == *'"claude-code"'* && "${darwin_casks}" == *'"claude"'* && "${darwin_casks}" == *'"chatgpt"'* && "${darwin_home_packages}" != *'codex-'* && "${darwin_home_packages}" != *'claude-code-'* ]]
+[[ "${darwin_podman_packages}" == *'"podman-'* && "${darwin_podman_packages}" == *'"podman-compose-'* && "${darwin_podman_packages}" == *'"sleepless-'* && "${darwin_sudo_extra_config}" == *'tester ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1'* && "${darwin_casks}" == *'"codex"'* && "${darwin_casks}" == *'"claude-code"'* && "${darwin_casks}" == *'"claude"'* && "${darwin_casks}" == *'"chatgpt"'* && "${darwin_home_packages}" != *'codex-'* && "${darwin_home_packages}" != *'claude-code-'* ]]
 nix eval "${override[@]}" --raw "${fixture}#homeConfigurations.test-standalone.config.home.username"
 nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.alice.home.username"
 nix eval "${override[@]}" --json "${fixture}#homeConfigurations.test-standalone.config.programs.lazygit.enable"

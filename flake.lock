@@ -428,7 +428,8 @@
         "nix-flatpak": "nix-flatpak",
         "nix-index-database": "nix-index-database",
         "nixpkgs": "nixpkgs",
-        "ragenix": "ragenix"
+        "ragenix": "ragenix",
+        "sleepless": "sleepless"
       }
     },
     "rust-overlay": {
@@ -449,6 +450,22 @@
       "original": {
         "owner": "oxalica",
         "repo": "rust-overlay",
+        "type": "github"
+      }
+    },
+    "sleepless": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1786185466,
+        "narHash": "sha256-ODE01bB4F9S2ShglnuklrtVeAddYqPrOP67EOy67nQ4=",
+        "owner": "bagbag",
+        "repo": "Sleepless",
+        "rev": "6ec9ebd3825a5392ee57ca41ca32cec271679f29",
+        "type": "github"
+      },
+      "original": {
+        "owner": "bagbag",
+        "repo": "Sleepless",
         "type": "github"
       }
     },
