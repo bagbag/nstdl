@@ -29,6 +29,7 @@ swiftPackages.stdenv.mkDerivation {
       -module-name Sleepless \
       -Xlinker -platform_version -Xlinker macos -Xlinker 13.0 -Xlinker 26.0 \
       -framework AppKit \
+      -framework CoreGraphics \
       -framework ServiceManagement \
       App.swift \
       -o Sleepless

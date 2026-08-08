@@ -456,11 +456,11 @@
     "sleepless": {
       "flake": false,
       "locked": {
-        "lastModified": 1786185466,
-        "narHash": "sha256-ODE01bB4F9S2ShglnuklrtVeAddYqPrOP67EOy67nQ4=",
+        "lastModified": 1786221990,
+        "narHash": "sha256-Gry8/Rs5Y2KWnLDbPCS5XtoUTNNT3Oov47m31O97URQ=",
         "owner": "bagbag",
         "repo": "Sleepless",
-        "rev": "6ec9ebd3825a5392ee57ca41ca32cec271679f29",
+        "rev": "c9e4be8ec389b89c2000e55675e6f3fd13e15f1d",
         "type": "github"
       },
       "original": {
