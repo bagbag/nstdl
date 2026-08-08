@@ -340,6 +340,7 @@
               "developer"
               "desktop-apps"
               "podman"
+              "battery-charge-limit"
               "sleepless"
               "secrets"
               "ai-agent-tools"
