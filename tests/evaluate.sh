@@ -167,7 +167,6 @@ if ! rg -q "requires format = plain" "${postgresql_invalid_output}"; then
   exit 1
 fi
 rm -f "${postgresql_invalid_output}"
-nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-secrets.config.system.build.toplevel.drvPath"
 nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-secrets.config.age.rekey.hostPubkey"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-secrets.config.age.rekey.extraEncryptionPubkeys"
 master_identity_count="$(nix eval "${override[@]}" --raw --apply 'identities: builtins.toString (builtins.length identities)' "${fixture}#nixosConfigurations.test-secrets.config.age.rekey.masterIdentities")"
@@ -280,7 +279,7 @@ pbs_system_user="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfiguratio
 pbs_system_group="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-proxmox-backup.config.systemd.services.nstdl-proxmox-backup-system.serviceConfig.Group")"
 
 [[ "${pbs_script}" == *"--keep-weekly=4"* && "${pbs_script}" != *"--keep-daily=7"* ]]
-[[ "${pbs_script}" == *"--ns' 'servers"* && "${pbs_script}" == *"--exclude' '/nix/store"* && "${pbs_script}" != *"--change-detection-mode' 'metadata"* ]]
+[[ "${pbs_script}" == *"--ns' 'servers"* && "${pbs_script}" == *"--exclude' '/nix/store"* && "${pbs_script}" == *"--change-detection-mode' 'metadata"* ]]
 [[ "${pbs_credentials}" == *"/run/agenix/pbs-token"* && "${pbs_credentials}" != *"/nix/store/"* ]]
 [[ "${pbs_after}" == *"network-online.target"* ]]
 [[ "${pbs_defaulted_script}" == *"--ns' 'default-namespace"* && "${pbs_defaulted_script}" == *"--change-detection-mode' 'metadata"* && "${pbs_defaulted_script}" == *"--exclude' '/var/cache"* ]]
@@ -288,14 +287,12 @@ pbs_system_group="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurati
 [[ "${pbs_system_user}" == "nobody" && "${pbs_system_group}" == "nogroup" ]]
 [[ "${pbs_defaulted_timer}" == *'"OnCalendar":"hourly"'* && "${pbs_defaulted_timer}" == *'"Persistent":false'* ]]
 
-pbs_wrapper="$(nix eval --impure --raw --expr "
-  let
-    flake = builtins.getFlake \"path:${repo_dir}/tests/fixture-flake\";
-    packages = flake.nixosConfigurations.test-proxmox-backup.config.environment.systemPackages;
-  in
-    (builtins.head (builtins.filter (package: package.name == \"proxmox-backup-client-system\") packages)).outPath
-")"
-nix build --no-link "${pbs_wrapper}"
+pbs_wrapper_drv="$(nix eval "${override[@]}" --raw --apply '
+  packages:
+  (builtins.head (builtins.filter (package: package.name == "proxmox-backup-client-system") packages)).drvPath
+' "${fixture}#nixosConfigurations.test-proxmox-backup.config.environment.systemPackages")"
+nix build --no-link "${pbs_wrapper_drv}^out"
+pbs_wrapper="$(nix-store -q --outputs "${pbs_wrapper_drv}")"
 pbs_wrapper_test="$(mktemp)"
 trap 'rm -f "${pbs_wrapper_test}"' EXIT
 sed '/^exec .*systemd-run /c\printf "%s\\n" "$@"' "${pbs_wrapper}/bin/proxmox-backup-client-system" > "${pbs_wrapper_test}"
@@ -401,6 +398,7 @@ nix eval --impure --raw --expr "
   (flake.inputs.nixpkgs.lib.nixosSystem {
     system = \"x86_64-linux\";
     modules = [
+      (import "${repo_dir}/modules/nixos/profiles/core.nix")
       (import "${repo_dir}/modules/nixos/profiles/server.nix")
       (import "${repo_dir}/modules/nixos/profiles/developer.nix")
       {
@@ -422,6 +420,7 @@ nix eval --impure --raw --expr "
   (flake.inputs.home-manager.lib.homeManagerConfiguration {
     inherit pkgs;
     modules = [
+      flake.inputs.nix-index-database.homeModules.nix-index
       (import "${repo_dir}/modules/home-manager/profiles/developer.nix")
       {
         home.username = \"raw-user\";
@@ -439,6 +438,7 @@ nix eval --impure --raw --expr "
   (flake.inputs.nix-darwin.lib.darwinSystem {
     system = \"aarch64-darwin\";
     modules = [
+      (import "${repo_dir}/modules/darwin/profiles/core.nix")
       (import "${repo_dir}/modules/darwin/profiles/workstation.nix")
       (import "${repo_dir}/modules/darwin/profiles/developer.nix")
       {

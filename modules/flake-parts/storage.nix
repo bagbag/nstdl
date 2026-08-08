@@ -34,17 +34,17 @@ let
               description = "systemd calendar expression for local snapshots.";
             };
             hourly = mkOption {
-              type = types.positive;
+              type = types.ints.positive;
               default = 72;
               description = "Hourly snapshots retained by btrbk.";
             };
             daily = mkOption {
-              type = types.positive;
+              type = types.ints.positive;
               default = 14;
               description = "Daily snapshots retained by btrbk.";
             };
             weekly = mkOption {
-              type = types.positive;
+              type = types.ints.positive;
               default = 4;
               description = "Weekly snapshots retained by btrbk.";
             };
