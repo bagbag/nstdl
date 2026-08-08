@@ -217,7 +217,8 @@ accounts, and optional root break-glass access.
   through Homebrew with a 65–70% charge band. It keeps upstream diagnostic
   logging and allows local users to temporarily suspend the limit with
   `batt disable --for=1d`; the next configuration activation restores the
-  declared band.
+  declared band. Disable macOS Optimized Battery Charging and any native
+  charge limit first, so batt is the only charge controller.
 - `remote-access`: OpenSSH with firewall integration, disabled password and
   keyboard-interactive authentication, and key-only root break-glass support.
 - `sleepless`: on Darwin, builds the pinned Sleepless fork from source, installs

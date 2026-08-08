@@ -45,7 +45,9 @@ let
     in
     {
       home-manager.users = lib.mapAttrs (name: user: {
-        imports = homeModulesFor user.home.features;
+        imports = homeModulesFor user.home.features ++ lib.optionals (
+          platform == "darwin" && hasFeature "battery-charge-limit" host
+        ) [ ../home-manager/features/batt.nix ];
         _module.args.nstdlLocale = host.locale;
         home = {
           username = name;

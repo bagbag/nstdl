@@ -9,10 +9,9 @@ in
 {
   homebrew.brews = [ "batt" ];
 
-  system.activationScripts.nstdlBattConfig.text = ''
-    install -d -o root -g wheel -m 0755 /var/db
-    install -o root -g wheel -m 0644 ${battConfig} /var/db/batt.json
-    launchctl kill -s HUP system/org.nixos.nstdl-batt 2>/dev/null || true
+  system.activationScripts.postActivation.text = ''
+    install -o root -g wheel -m 0644 ${battConfig} /etc/batt.json
+    launchctl kickstart -k system/org.nixos.nstdl-batt
   '';
 
   launchd.daemons.nstdl-batt.serviceConfig = {
@@ -21,7 +20,6 @@ in
       "daemon"
       "--log-level=debug"
       "--always-allow-non-root-access"
-      "--config=/var/db/batt.json"
     ];
     KeepAlive = true;
     ProcessType = "Interactive";
