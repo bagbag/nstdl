@@ -76,6 +76,12 @@ in
     darwin.office-suite = {
       homebrew.casks = [ "libreoffice" ];
     };
+    darwin.messaging = {
+      homebrew.casks = [
+        "discord"
+        "signal"
+      ];
+    };
     darwin.ai-agent-tools = {
       homebrew.casks = [
         "codex"

@@ -287,6 +287,7 @@ in
                   types.enum [
                     "developer"
                     "desktop-apps"
+                    "messaging"
                     "podman"
                     "battery-charge-limit"
                     "postgresql"

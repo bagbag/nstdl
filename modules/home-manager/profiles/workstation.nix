@@ -33,9 +33,11 @@ in
       window-padding-x = 4;
       window-padding-y = 4;
       mouse-hide-while-typing = true;
-      scrollback-limit = 100000000;
-      background-opacity = 0.95;
-      background-blur = true;
+      scrollback-limit = 100000;
+      background-opacity = 0.9;
+      background-blur = false;
+      unfocused-split-opacity = 0.9;
+      window-vsync = true;
       shell-integration-features = [
         "ssh-env"
         "ssh-terminfo"

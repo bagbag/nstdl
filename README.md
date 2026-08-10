@@ -206,6 +206,8 @@ accounts, and optional root break-glass access.
   `ai-agent-tools` installs Codex and Claude Code through Nix on Linux; on
   Darwin it installs the Codex, Claude Code, Claude, and ChatGPT Homebrew
   casks.
+  `messaging` installs Signal through Nix on Linux and the Discord and Signal
+  Homebrew casks on Darwin.
   `full-stack-developer` composes the approved developer-oriented capabilities;
   personal identities, secrets, editor settings, and SSH hosts stay in the
   consuming configuration.

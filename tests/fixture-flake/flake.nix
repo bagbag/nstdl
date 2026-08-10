@@ -132,6 +132,7 @@
                     "desktop-apps"
                     "full-stack-developer"
                     "gnome-extras"
+                    "messaging"
                     "ai-agent-tools"
                   ];
                 };
@@ -343,6 +344,7 @@
               "battery-charge-limit"
               "sleepless"
               "secrets"
+              "messaging"
               "ai-agent-tools"
             ];
             secrets.hostPubkey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHBJaMs/1fLo7FOQD5xTHc7Pox4rHN5G6hX96P81DO4e";
