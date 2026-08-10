@@ -131,6 +131,7 @@
                     "developer-extras"
                     "desktop-apps"
                     "full-stack-developer"
+                    "document-tools"
                     "gnome-extras"
                     "messaging"
                     "ai-agent-tools"

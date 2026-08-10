@@ -208,9 +208,10 @@ accounts, and optional root break-glass access.
   casks.
   `messaging` installs Signal through Nix on Linux and the Discord and Signal
   Homebrew casks on Darwin.
-  `full-stack-developer` composes the approved developer-oriented capabilities;
-  personal identities, secrets, editor settings, and SSH hosts stay in the
-  consuming configuration.
+  `full-stack-developer` supplies JavaScript, Python, native, and database
+  tooling. Supporting utilities and document authoring remain owned by
+  `developer-extras` and `document-tools`; personal identities, secrets,
+  editor settings, and SSH hosts stay in the consuming configuration.
 - `podman`: rootless Podman with DNS-enabled default networking and Docker Hub
   plus Quay search registries on NixOS; on macOS it supplies `podman` and
   `podman-compose`, while the user initializes and starts the Podman VM once

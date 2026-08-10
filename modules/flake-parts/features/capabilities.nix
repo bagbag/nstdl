@@ -26,8 +26,7 @@ let
     pkgs:
     javascriptTools pkgs
     ++ [ pkgs.python3 ]
-    ++ nativeDevelopmentTools pkgs
-    ++ documentAuthoringTools pkgs;
+    ++ nativeDevelopmentTools pkgs;
 
   developerExtras =
     pkgs:
@@ -217,11 +216,7 @@ in
           with pkgs;
           fullStackTools pkgs
           ++ [ postgresql_18 ]
-          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-            dbeaver-bin
-            d2
-          ]
-          ++ developerExtras pkgs;
+          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ dbeaver-bin ];
       };
     };
   };
