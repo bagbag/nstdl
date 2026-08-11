@@ -1,4 +1,21 @@
-{ pkgs, ... }:
+{
+  lib,
+  options,
+  pkgs,
+  ...
+}:
+let
+  hasFzfNushellIntegration = lib.hasAttrByPath [
+    "programs"
+    "fzf"
+    "enableNushellIntegration"
+  ] options;
+  hasFzfHistoryWidget = lib.hasAttrByPath [
+    "programs"
+    "fzf"
+    "historyWidget"
+  ] options;
+in
 {
   home.packages = with pkgs; [
     btop
@@ -215,6 +232,11 @@
     fzf = {
       enable = true;
       enableZshIntegration = true;
+    }
+    // lib.optionalAttrs hasFzfNushellIntegration {
+      enableNushellIntegration = lib.versionAtLeast pkgs.fzf.version "0.73.0";
+    }
+    // lib.optionalAttrs hasFzfHistoryWidget {
       historyWidget.command = "";
     };
     carapace = {

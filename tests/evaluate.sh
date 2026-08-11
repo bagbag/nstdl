@@ -98,6 +98,7 @@ workstation_home_packages="$(nix eval "${override[@]}" --json --apply 'packages:
 workstation_home_packages_unique="$(nix eval "${override[@]}" --json --apply 'packages: let names = builtins.map (package: package.name) packages; in builtins.all (name: builtins.length (builtins.filter (candidate: candidate == name) names) == 1) names' "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.tester.home.packages")"
 workstation_ghostty_settings="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.tester.programs.ghostty.settings")"
 developer_home_packages="$(nix eval "${override[@]}" --json --apply 'packages: builtins.map (package: package.name) packages' "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.alice.home.packages")"
+developer_fzf_nushell_integration="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.alice.programs.fzf.enableNushellIntegration")"
 workstation_system_packages="$(nix eval "${override[@]}" --json --apply 'packages: builtins.map (package: package.name) packages' "${fixture}#nixosConfigurations.test-workstation.config.environment.systemPackages")"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.nix.settings.substituters"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.nix.gc.automatic"
@@ -109,6 +110,7 @@ nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstatio
 [[ "${workstation_intel_pstate}" == *'"intel_pstate=active"'* && "${workstation_va_driver}" == "iHD" && "${workstation_auto_cpufreq}" == "true" && "${workstation_thermald}" == "true" && "${workstation_power_profiles}" == "false" && "${workstation_intel_microcode}" == "false" ]]
 [[ "${workstation_ghostty_settings}" == *'"background-blur":[false]'* && "${workstation_ghostty_settings}" == *'"background-opacity":[0.9]'* && "${workstation_ghostty_settings}" == *'"scrollback-limit":[10000000]'* && "${workstation_ghostty_settings}" == *'"unfocused-split-opacity":[0.9]'* && "${workstation_ghostty_settings}" == *'"window-vsync":[true]'* ]]
 [[ "${workstation_home_packages_unique}" == "true" ]]
+[[ "${developer_fzf_nushell_integration}" == "true" ]]
 [[ "${workstation_home_packages}" == *'signal-desktop-'* ]]
 [[ "${workstation_home_packages}" == *'bc-'* && "${workstation_home_packages}" == *'e2fsprogs-'* && "${workstation_home_packages}" == *'openssl-'* && "${workstation_home_packages}" == *'unzip-'* && "${workstation_home_packages}" == *'codex-'* && "${workstation_home_packages}" == *'claude-code-'* && "${workstation_home_packages}" == *'dbeaver-bin-'* && "${workstation_home_packages}" == *'typst-'* && "${workstation_home_packages}" == *'pandoc-'* && "${workstation_home_packages}" == *'pdfcpu-'* && "${workstation_home_packages}" != *'ragenix-'* && "${workstation_home_packages}" != *'sysprof-'* && "${developer_home_packages}" != *'dbeaver-bin-'* ]]
 [[ "${workstation_system_packages}" == *'nodejs-'* && "${workstation_system_packages}" == *'oxlint-'* && "${workstation_system_packages}" != *'typst-'* && "${workstation_system_packages}" != *'pandoc-'* ]]
@@ -461,6 +463,18 @@ nix eval --impure --raw --expr "
 "
 
 nix eval --override-input nstdl "path:${repo_dir}" --no-write-lock-file --raw "path:${repo_dir}/example#nixosConfigurations.demo-server.config.system.build.toplevel.drvPath"
+
+stable_override=(
+  --override-input nstdl "path:${repo_dir}"
+  --override-input nstdl/nixpkgs github:NixOS/nixpkgs/nixos-26.05
+  --override-input nstdl/home-manager github:nix-community/home-manager/release-26.05
+  --no-write-lock-file
+)
+nix eval "${stable_override[@]}" --raw "${fixture}#homeConfigurations.test-standalone.config.home.activationPackage.drvPath"
+stable_fzf_enabled="$(nix eval "${stable_override[@]}" --json "${fixture}#homeConfigurations.test-standalone.config.programs.fzf.enable")"
+stable_nushell_enabled="$(nix eval "${stable_override[@]}" --json "${fixture}#homeConfigurations.test-standalone.config.programs.nushell.enable")"
+stable_fzf_nushell_integration_present="$(nix eval "${stable_override[@]}" --json --apply 'fzf: fzf ? enableNushellIntegration' "${fixture}#homeConfigurations.test-standalone.config.programs.fzf")"
+[[ "${stable_fzf_enabled}" == "true" && "${stable_nushell_enabled}" == "true" && "${stable_fzf_nushell_integration_present}" == "false" ]]
 
 if nix eval --impure --expr "
   let

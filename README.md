@@ -249,8 +249,33 @@ Home Manager module composition is intentionally not a supported API.
 ## Input sharing
 
 `nstdl` owns and locks its Home Manager, nix-darwin, nix-index-database, Disko,
-and deploy-rs inputs. A normal consumer only needs to share `nixpkgs` and
+and deploy-rs inputs. Its defaults pair unstable nixpkgs with Home Manager
+master. A consumer using those defaults only needs to share `nixpkgs` and
 `flake-parts`, as shown above.
+
+A stable consumer must provide a matching nixpkgs and Home Manager release and
+make nstdl follow both. For example, a 26.05 consumer uses:
+
+```nix
+nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+
+home-manager = {
+  url = "github:nix-community/home-manager/release-26.05";
+  inputs.nixpkgs.follows = "nixpkgs";
+};
+
+nstdl = {
+  url = "github:bagbag/nstdl";
+  inputs.nixpkgs.follows = "nixpkgs";
+  inputs.home-manager.follows = "home-manager";
+  inputs.flake-parts.follows = "flake-parts";
+};
+```
+
+The developer profile supports both Home Manager channels. Features absent
+from a stable Home Manager release, such as native fzf integration for
+Nushell, are omitted while fzf, nstdl's explicit Nushell keybindings, and Atuin
+remain available.
 
 If a consumer also imports Home Manager or nix-darwin directly, declare that
 input in the consumer and make `nstdl` follow it so the lock file does not hold
@@ -279,4 +304,5 @@ bash tests/evaluate.sh
 ```
 
 It evaluates NixOS server/workstation, Darwin workstation, standalone Home
-Manager, the repository example, and invalid configuration boundaries.
+Manager, the repository example, invalid configuration boundaries, and the
+supported unstable/master and 26.05/release-26.05 input pairs.
