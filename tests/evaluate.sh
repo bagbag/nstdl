@@ -19,7 +19,7 @@ nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-server.con
 qemu_guest_enabled="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-server.config.services.qemuGuest.enable")"
 [[ "${server_allow_users}" == *'"admin"'* && "${server_allow_users}" == *'"root"'* && "${server_allow_users}" == *'"deploy"'* ]]
 [[ "${server_root_keys}" == *"alice"* ]]
-[[ "${server_kernel}" == 6.12* && "${server_systemd_boot}" == "true" && "${server_efi_mutation}" == "true" && "${server_zram}" == "true" && "${server_firmware}" == "true" ]]
+[[ "${server_kernel}" == 6.12* && "${server_systemd_boot}" == "true" && "${server_efi_mutation}" == "true" && "${server_zram}" == "true" && "${server_firmware}" == "false" ]]
 deploy_target="$(nix eval "${override[@]}" --raw "${fixture}#deploy.nodes.test-server.hostname")"
 deploy_user="$(nix eval "${override[@]}" --raw "${fixture}#deploy.nodes.test-server.sshUser")"
 network_addresses="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-server.config.systemd.network.networks.10-nstdl.networkConfig.Address")"
@@ -27,7 +27,8 @@ network_addresses="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigura
 nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-root-only.config.system.build.toplevel.drvPath"
 root_only_allow_users="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-root-only.config.services.openssh.settings.AllowUsers")"
 root_only_keys="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-root-only.config.users.users.root.openssh.authorizedKeys.keys")"
-[[ "${root_only_allow_users}" == '["root"]' && "${root_only_keys}" == *"tester"* ]]
+root_only_firmware="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-root-only.config.hardware.enableRedistributableFirmware")"
+[[ "${root_only_allow_users}" == '["root"]' && "${root_only_keys}" == *"tester"* && "${root_only_firmware}" == "true" ]]
 
 root_ssh_bypass_output="$(mktemp)"
 if nix eval --impure --expr "
@@ -105,7 +106,7 @@ nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstatio
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.tester.services.flatpak.update.auto"
 [[ "${qemu_guest_enabled}" == "true" && "${vmware_guest_enabled}" == "true" && "${workstation_ssh_enabled}" == "true" && "${workstation_ssh_password_auth}" == "false" && "${workstation_podman_enabled}" == "true" && "${workstation_podman_search_registries}" == '["docker.io","quay.io"]' && "${workstation_podman_policy}" == *'"default":[{"type":"reject"}]'* && "${workstation_podman_policy}" == *'"docker.io":[{"type":"insecureAcceptAnything"}]'* && "${workstation_podman_policy}" == *'"quay.io":[{"type":"insecureAcceptAnything"}]'* && "${workstation_podman_policy}" == *'"docker-daemon":{"":['* && "${workstation_nh_enabled}" == "true" && "${workstation_nh_clean_enabled}" == "true" && "${workstation_nh_clean_args}" == "--keep 5 --keep-since 14d --optimise" && "${workstation_gc_automatic}" == "false" && "${workstation_optimise_automatic}" == "false" && "${workstation_trusted_users}" == *'"tester"'* ]]
 [[ "${workstation_console_mode}" == "max" && "${workstation_boot_limit}" == "10" && "${workstation_tmp_huge_pages}" == "within_size" && "${workstation_xkb_layout}" == "de" && "${workstation_xkb_variant}" == "nodeadkeys" && "${workstation_locale_format}" == "de_DE.UTF-8" && "${workstation_ozone}" == "1" ]]
-[[ "${workstation_intel_pstate}" == *'"intel_pstate=active"'* && "${workstation_va_driver}" == "iHD" && "${workstation_auto_cpufreq}" == "true" && "${workstation_thermald}" == "true" && "${workstation_power_profiles}" == "false" && "${workstation_intel_microcode}" == "true" ]]
+[[ "${workstation_intel_pstate}" == *'"intel_pstate=active"'* && "${workstation_va_driver}" == "iHD" && "${workstation_auto_cpufreq}" == "true" && "${workstation_thermald}" == "true" && "${workstation_power_profiles}" == "false" && "${workstation_intel_microcode}" == "false" ]]
 [[ "${workstation_ghostty_settings}" == *'"background-blur":[false]'* && "${workstation_ghostty_settings}" == *'"background-opacity":[0.9]'* && "${workstation_ghostty_settings}" == *'"scrollback-limit":[10000000]'* && "${workstation_ghostty_settings}" == *'"unfocused-split-opacity":[0.9]'* && "${workstation_ghostty_settings}" == *'"window-vsync":[true]'* ]]
 [[ "${workstation_home_packages_unique}" == "true" ]]
 [[ "${workstation_home_packages}" == *'signal-desktop-'* ]]

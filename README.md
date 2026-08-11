@@ -68,8 +68,9 @@ additive. `developer` provides system tooling; add it to an account's
 `home.features` when that person's Home Manager profile should receive the
 opinionated terminal configuration. `virtualization` is the one portable host
 selector: use `"none"` (the default), `"qemu"`, or `"vmware"` to enable the
-corresponding NixOS guest agent. A host module remains the place for all other
-host facts.
+corresponding NixOS guest agent. Redistributable device firmware is enabled on
+physical hosts and omitted from QEMU and VMware guests. A host module remains
+the place for all other host facts.
 
 The resulting configuration is available as `.#nixosConfigurations.app-01`.
 For example, build it with `nix build .#nixosConfigurations.app-01.config.system.build.toplevel`.
@@ -194,7 +195,7 @@ accounts, and optional root break-glass access.
 ## Profiles
 
 - `core`: firewall, scheduled `nh clean` maintenance, Lix, systemd-boot/EFI,
-  zram, and portable baseline defaults.
+  zram, physical-host firmware, and portable baseline defaults.
 - `server`: OpenSSH and the LTS kernel.
 - `workstation`: latest kernel, GNOME, audio, Bluetooth, fonts, Flatpak, and
   desktop baseline.

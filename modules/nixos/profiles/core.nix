@@ -81,7 +81,7 @@ in
     environment.shells = [ pkgs.nushell ];
 
     nixpkgs.config.allowUnfree = true;
-    hardware.enableRedistributableFirmware = lib.mkDefault true;
+    hardware.enableRedistributableFirmware = lib.mkDefault (cfg.virtualization == "none");
 
     nix = {
       package = pkgs.lix;
