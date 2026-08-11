@@ -33,7 +33,7 @@ in
       window-padding-x = 4;
       window-padding-y = 4;
       mouse-hide-while-typing = true;
-      scrollback-limit = 100000;
+      scrollback-limit = 10000000;
       background-opacity = 0.9;
       background-blur = false;
       unfocused-split-opacity = 0.9;
