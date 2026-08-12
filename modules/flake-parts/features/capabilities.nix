@@ -116,6 +116,7 @@ in
       };
       document-tools = { pkgs, ... }: {
         home.packages = documentAuthoringTools pkgs ++ (with pkgs; [
+          imagemagick
           pdfcpu
           poppler-utils
           qpdf

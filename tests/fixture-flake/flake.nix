@@ -359,6 +359,7 @@
                   "workstation"
                   "developer"
                   "desktop-apps"
+                  "document-tools"
                   "ai-agent-tools"
                 ];
               };

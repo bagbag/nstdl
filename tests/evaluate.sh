@@ -112,7 +112,7 @@ nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstatio
 [[ "${workstation_home_packages_unique}" == "true" ]]
 [[ "${developer_fzf_nushell_integration}" == "true" ]]
 [[ "${workstation_home_packages}" == *'signal-desktop-'* ]]
-[[ "${workstation_home_packages}" == *'bc-'* && "${workstation_home_packages}" == *'e2fsprogs-'* && "${workstation_home_packages}" == *'openssl-'* && "${workstation_home_packages}" == *'unzip-'* && "${workstation_home_packages}" == *'codex-'* && "${workstation_home_packages}" == *'claude-code-'* && "${workstation_home_packages}" == *'dbeaver-bin-'* && "${workstation_home_packages}" == *'typst-'* && "${workstation_home_packages}" == *'pandoc-'* && "${workstation_home_packages}" == *'pdfcpu-'* && "${workstation_home_packages}" != *'ragenix-'* && "${workstation_home_packages}" != *'sysprof-'* && "${developer_home_packages}" != *'dbeaver-bin-'* ]]
+[[ "${workstation_home_packages}" == *'bc-'* && "${workstation_home_packages}" == *'e2fsprogs-'* && "${workstation_home_packages}" == *'openssl-'* && "${workstation_home_packages}" == *'unzip-'* && "${workstation_home_packages}" == *'codex-'* && "${workstation_home_packages}" == *'claude-code-'* && "${workstation_home_packages}" == *'dbeaver-bin-'* && "${workstation_home_packages}" == *'typst-'* && "${workstation_home_packages}" == *'pandoc-'* && "${workstation_home_packages}" == *'imagemagick-'* && "${workstation_home_packages}" == *'pdfcpu-'* && "${workstation_home_packages}" != *'ragenix-'* && "${workstation_home_packages}" != *'sysprof-'* && "${developer_home_packages}" != *'dbeaver-bin-'* ]]
 [[ "${workstation_system_packages}" == *'nodejs-'* && "${workstation_system_packages}" == *'oxlint-'* && "${workstation_system_packages}" != *'typst-'* && "${workstation_system_packages}" != *'pandoc-'* ]]
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.services.postgresql.ensureDatabases"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.services.postgresql.ensureUsers"
@@ -396,6 +396,7 @@ darwin_brews="$(nix eval "${override[@]}" --json --apply 'brews: builtins.map (b
 darwin_activation_script="$(nix eval "${override[@]}" --raw "${fixture}#darwinConfigurations.test-darwin.config.system.activationScripts.script.text")"
 darwin_nushell_config="$(nix eval "${override[@]}" --raw "${fixture}#darwinConfigurations.test-darwin.config.home-manager.users.tester.programs.nushell.extraConfig")"
 [[ "${darwin_casks}" == *'"signal"'* ]]
+[[ "${darwin_home_packages}" == *'imagemagick-'* ]]
 for cask in firefox@developer-edition keepassxc linearmouse rustdesk spotify visual-studio-code whatsapp; do
   [[ "${darwin_casks}" == *"\"${cask}\""* ]]
 done
