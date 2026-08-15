@@ -4,6 +4,7 @@
     "keepassxc"
     "linearmouse"
     "rustdesk"
+    "stats"
     "spotify"
     "visual-studio-code"
     "whatsapp"
