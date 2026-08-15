@@ -6,6 +6,7 @@
       autoUpdate = true;
       upgrade = true;
       cleanup = "zap";
+      extraFlags = [ "--verbose" ];
     };
     casks = [ "ghostty" ];
   };
