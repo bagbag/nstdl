@@ -37,6 +37,8 @@ in
   };
 
   config = {
+    environment.variables.NH_SHOW_ACTIVATION_LOGS = "1";
+
     assertions = [
       {
         assertion = cfg.user.name != null;

@@ -77,6 +77,8 @@ in
   };
 
   config = {
+    environment.variables.NH_SHOW_ACTIVATION_LOGS = "1";
+
     programs.zsh.enable = true;
     environment.shells = [ pkgs.nushell ];
 
