@@ -6,6 +6,7 @@
     "rustdesk"
     "stats"
     "spotify"
+    "utm"
     "visual-studio-code"
     "whatsapp"
   ];
