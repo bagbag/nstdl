@@ -38,6 +38,7 @@ let
       libpst
       repomix
       openssl
+      _7zz
       unzip
     ]
     ++
