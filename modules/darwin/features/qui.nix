@@ -3,14 +3,16 @@ let
   userName = config.nstdl.user.name;
 in
 {
-  config = {
-    assertions = [
-      {
-        assertion = userName != null;
-        message = "nstdl qui requires a primary user.";
-      }
-    ];
-  } // lib.optionalAttrs (userName != null) (
+  assertions = [
+    {
+      assertion = userName != null;
+      message = "nstdl qui requires a primary user.";
+    }
+  ];
+
+  environment.systemPackages = lib.mkIf (userName != null) [ pkgs.qui ];
+
+  launchd.user.agents.qui.serviceConfig = lib.mkIf (userName != null) (
     let
       userHome = config.users.users.${userName}.home;
       configDir = "${userHome}/.config/qui";
@@ -33,15 +35,11 @@ in
       '';
     in
     {
-      environment.systemPackages = [ pkgs.qui ];
-
-      launchd.user.agents.qui.serviceConfig = {
-        ProgramArguments = [ launcher ];
-        KeepAlive = true;
-        RunAtLoad = true;
-        StandardOutPath = "${userHome}/Library/Logs/qui.log";
-        StandardErrorPath = "${userHome}/Library/Logs/qui.log";
-      };
+      ProgramArguments = [ launcher ];
+      KeepAlive = true;
+      RunAtLoad = true;
+      StandardOutPath = "${userHome}/Library/Logs/qui.log";
+      StandardErrorPath = "${userHome}/Library/Logs/qui.log";
     }
   );
 }
