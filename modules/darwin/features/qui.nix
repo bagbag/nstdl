@@ -21,8 +21,13 @@ in
         set -eu
 
         config_dir=${configDirArg}
+        config_file="$config_dir/config.toml"
         secret_file="$config_dir/session-secret"
         ${pkgs.coreutils}/bin/mkdir -p "$config_dir"
+
+        if [ ! -f "$config_file" ]; then
+          ${pkgs.qui}/bin/qui generate-config --config-dir "$config_dir"
+        fi
 
         if [ ! -s "$secret_file" ]; then
           umask 077
