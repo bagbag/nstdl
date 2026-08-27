@@ -401,7 +401,7 @@ darwin_activation_script="$(nix eval "${override[@]}" --raw "${fixture}#darwinCo
 darwin_nushell_config="$(nix eval "${override[@]}" --raw "${fixture}#darwinConfigurations.test-darwin.config.home-manager.users.tester.programs.nushell.extraConfig")"
 [[ "${darwin_casks}" == *'"signal"'* ]]
 [[ "${darwin_home_packages}" == *'imagemagick-'* ]]
-for cask in firefox@developer-edition keka keepassxc linearmouse rustdesk spotify visual-studio-code whatsapp; do
+for cask in coteditor firefox@developer-edition keka keepassxc linearmouse rustdesk spacedrive spotify visual-studio-code whatsapp; do
   [[ "${darwin_casks}" == *"\"${cask}\""* ]]
 done
 [[ "${darwin_podman_packages}" == *'"podman-'* && "${darwin_podman_packages}" == *'"podman-compose-'* && "${darwin_podman_packages}" == *'"sleepless-'* && "${darwin_sudo_extra_config}" == *'tester ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1'* && "${darwin_casks}" == *'"codex"'* && "${darwin_casks}" == *'"claude-code"'* && "${darwin_casks}" == *'"claude"'* && "${darwin_casks}" == *'"chatgpt"'* && "${darwin_casks}" == *'"discord"'* && "${darwin_home_packages}" != *'codex-'* && "${darwin_home_packages}" != *'claude-code-'* && "${darwin_brews}" == *'"batt"'* && "${darwin_activation_script}" == *'/etc/batt.json'* && "${darwin_activation_script}" == *'launchctl kickstart -k system/org.nixos.nstdl-batt'* && "${darwin_nushell_config}" == *'extern batt'* ]]
