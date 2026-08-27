@@ -35,7 +35,7 @@ in
       '';
     in
     {
-      ProgramArguments = [ launcher ];
+      ProgramArguments = [ "${launcher}" ];
       KeepAlive = true;
       RunAtLoad = true;
       StandardOutPath = "${userHome}/Library/Logs/qui.log";
