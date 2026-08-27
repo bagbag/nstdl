@@ -1,15 +1,18 @@
 { config, lib, pkgs, ... }:
+let
+  userName = config.nstdl.user.name;
+in
 {
-  assertions = [
-    {
-      assertion = config.nstdl.user.name != null;
-      message = "nstdl qui requires a primary user.";
-    }
-  ];
-
-  config = lib.mkIf (config.nstdl.user.name != null) (
+  config = {
+    assertions = [
+      {
+        assertion = userName != null;
+        message = "nstdl qui requires a primary user.";
+      }
+    ];
+  } // lib.optionalAttrs (userName != null) (
     let
-      userHome = config.users.users.${config.nstdl.user.name}.home;
+      userHome = config.users.users.${userName}.home;
       configDir = "${userHome}/.config/qui";
       configDirArg = lib.escapeShellArg configDir;
       launcher = pkgs.writeShellScript "nstdl-qui-launcher" ''
