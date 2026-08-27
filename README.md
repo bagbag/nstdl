@@ -209,6 +209,8 @@ accounts, and optional root break-glass access.
   casks.
   `messaging` installs Signal through Nix on Linux and the Discord and Signal
   Homebrew casks on Darwin.
+  `qui` runs the qBittorrent web UI with systemd on NixOS and launchd on
+  Darwin.
   `full-stack-developer` supplies JavaScript, Python, native, and database
   tooling. Supporting utilities and document authoring remain owned by
   `developer-extras` and `document-tools`; personal identities, secrets,

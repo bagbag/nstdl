@@ -94,6 +94,7 @@ workstation_auto_cpufreq="$(nix eval "${override[@]}" --json "${fixture}#nixosCo
 workstation_thermald="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.services.thermald.enable")"
 workstation_power_profiles="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.services.power-profiles-daemon.enable")"
 workstation_intel_microcode="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.hardware.cpu.intel.updateMicrocode")"
+workstation_qui_enabled="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.services.qui.enable")"
 workstation_home_packages="$(nix eval "${override[@]}" --json --apply 'packages: builtins.map (package: package.name) packages' "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.tester.home.packages")"
 workstation_home_packages_unique="$(nix eval "${override[@]}" --json --apply 'packages: let names = builtins.map (package: package.name) packages; in builtins.all (name: builtins.length (builtins.filter (candidate: candidate == name) names) == 1) names' "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.tester.home.packages")"
 workstation_ghostty_settings="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.tester.programs.ghostty.settings")"
@@ -108,6 +109,7 @@ nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstatio
 [[ "${qemu_guest_enabled}" == "true" && "${vmware_guest_enabled}" == "true" && "${workstation_ssh_enabled}" == "true" && "${workstation_ssh_password_auth}" == "false" && "${workstation_podman_enabled}" == "true" && "${workstation_podman_search_registries}" == '["docker.io","quay.io"]' && "${workstation_podman_policy}" == *'"default":[{"type":"reject"}]'* && "${workstation_podman_policy}" == *'"docker.io":[{"type":"insecureAcceptAnything"}]'* && "${workstation_podman_policy}" == *'"quay.io":[{"type":"insecureAcceptAnything"}]'* && "${workstation_podman_policy}" == *'"docker-daemon":{"":['* && "${workstation_nh_enabled}" == "true" && "${workstation_nh_clean_enabled}" == "true" && "${workstation_nh_clean_args}" == "--keep 5 --keep-since 14d --optimise" && "${workstation_gc_automatic}" == "false" && "${workstation_optimise_automatic}" == "false" && "${workstation_trusted_users}" == *'"tester"'* ]]
 [[ "${workstation_console_mode}" == "max" && "${workstation_boot_limit}" == "10" && "${workstation_tmp_huge_pages}" == "within_size" && "${workstation_xkb_layout}" == "de" && "${workstation_xkb_variant}" == "nodeadkeys" && "${workstation_locale_format}" == "de_DE.UTF-8" && "${workstation_ozone}" == "1" ]]
 [[ "${workstation_intel_pstate}" == *'"intel_pstate=active"'* && "${workstation_va_driver}" == "iHD" && "${workstation_auto_cpufreq}" == "true" && "${workstation_thermald}" == "true" && "${workstation_power_profiles}" == "false" && "${workstation_intel_microcode}" == "false" ]]
+[[ "${workstation_qui_enabled}" == "true" ]]
 [[ "${workstation_ghostty_settings}" == *'"background-blur":[false]'* && "${workstation_ghostty_settings}" == *'"background-opacity":[0.9]'* && "${workstation_ghostty_settings}" == *'"scrollback-limit":[10000000]'* && "${workstation_ghostty_settings}" == *'"unfocused-split-opacity":[0.9]'* && "${workstation_ghostty_settings}" == *'"window-vsync":[true]'* ]]
 [[ "${workstation_home_packages_unique}" == "true" ]]
 [[ "${developer_fzf_nushell_integration}" == "true" ]]
@@ -391,6 +393,8 @@ darwin_casks="$(nix eval "${override[@]}" --json --apply 'casks: builtins.map (c
 nix eval "${override[@]}" --json "${fixture}#darwinConfigurations.test-darwin.config.nix.gc.automatic"
 darwin_podman_packages="$(nix eval "${override[@]}" --json --apply 'packages: builtins.map (package: package.name) packages' "${fixture}#darwinConfigurations.test-darwin.config.environment.systemPackages")"
 darwin_sudo_extra_config="$(nix eval "${override[@]}" --raw "${fixture}#darwinConfigurations.test-darwin.config.security.sudo.extraConfig")"
+darwin_qui_program="$(nix eval "${override[@]}" --json "${fixture}#darwinConfigurations.test-darwin.config.launchd.user.agents.qui.serviceConfig.ProgramArguments")"
+darwin_qui_keepalive="$(nix eval "${override[@]}" --json "${fixture}#darwinConfigurations.test-darwin.config.launchd.user.agents.qui.serviceConfig.KeepAlive")"
 darwin_home_packages="$(nix eval "${override[@]}" --json --apply 'packages: builtins.map (package: package.name) packages' "${fixture}#darwinConfigurations.test-darwin.config.home-manager.users.tester.home.packages")"
 darwin_brews="$(nix eval "${override[@]}" --json --apply 'brews: builtins.map (brew: brew.name) brews' "${fixture}#darwinConfigurations.test-darwin.config.homebrew.brews")"
 darwin_activation_script="$(nix eval "${override[@]}" --raw "${fixture}#darwinConfigurations.test-darwin.config.system.activationScripts.script.text")"
@@ -401,6 +405,7 @@ for cask in firefox@developer-edition keka keepassxc linearmouse rustdesk spotif
   [[ "${darwin_casks}" == *"\"${cask}\""* ]]
 done
 [[ "${darwin_podman_packages}" == *'"podman-'* && "${darwin_podman_packages}" == *'"podman-compose-'* && "${darwin_podman_packages}" == *'"sleepless-'* && "${darwin_sudo_extra_config}" == *'tester ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1'* && "${darwin_casks}" == *'"codex"'* && "${darwin_casks}" == *'"claude-code"'* && "${darwin_casks}" == *'"claude"'* && "${darwin_casks}" == *'"chatgpt"'* && "${darwin_casks}" == *'"discord"'* && "${darwin_home_packages}" != *'codex-'* && "${darwin_home_packages}" != *'claude-code-'* && "${darwin_brews}" == *'"batt"'* && "${darwin_activation_script}" == *'/etc/batt.json'* && "${darwin_activation_script}" == *'launchctl kickstart -k system/org.nixos.nstdl-batt'* && "${darwin_nushell_config}" == *'extern batt'* ]]
+[[ "${darwin_qui_program}" == *'nstdl-qui-launcher'* && "${darwin_qui_keepalive}" == "true" ]]
 nix eval "${override[@]}" --raw "${fixture}#homeConfigurations.test-standalone.config.home.username"
 nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.alice.home.username"
 nix eval "${override[@]}" --json "${fixture}#homeConfigurations.test-standalone.config.programs.lazygit.enable"

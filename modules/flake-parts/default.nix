@@ -208,6 +208,7 @@ in
     ./features/accounts.nix
     (import ./features/developer.nix { inherit inputs; })
     ./features/podman.nix
+    ./features/qui.nix
     ./features/battery-charge-limit.nix
     ./features/postgresql.nix
     ./features/proxmox-backup.nix
@@ -289,6 +290,7 @@ in
                     "desktop-apps"
                     "messaging"
                     "podman"
+                    "qui"
                     "battery-charge-limit"
                     "postgresql"
                     "proxmox-backup"
