@@ -85,7 +85,7 @@ in
     darwin.ai-agent-tools = {
       homebrew.casks = [
         "codex"
-        "claude-code"
+        "claude-code@latest"
         "claude"
         "chatgpt"
       ];

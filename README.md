@@ -205,8 +205,8 @@ accounts, and optional root break-glass access.
   `container-development`, language toolchains, database and office tools,
   desktop application bundles, `vscode`, `ai-agent-tools`, and `secret-admin`.
   `ai-agent-tools` installs Codex and Claude Code through Nix on Linux; on
-  Darwin it installs the Codex, Claude Code, Claude, and ChatGPT Homebrew
-  casks.
+  Darwin it installs the Codex, latest-channel Claude Code, Claude, and ChatGPT
+  Homebrew casks.
   `messaging` installs Signal through Nix on Linux and the Discord and Signal
   Homebrew casks on Darwin.
   `qui` runs the qBittorrent web UI with systemd on NixOS and launchd on
