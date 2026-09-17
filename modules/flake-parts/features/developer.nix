@@ -8,6 +8,7 @@
       imports = [
         inputs.nix-index-database.homeModules.nix-index
         ../../home-manager/profiles/developer.nix
+        ../../home-manager/features/pnpm-registry-auth.nix
       ];
     };
   };
