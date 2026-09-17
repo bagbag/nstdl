@@ -47,7 +47,7 @@ in
 {
   options.nstdl.linuxBuilder.cores = lib.mkOption {
     type = lib.types.ints.positive;
-    default = 4;
+    default = 8;
     description = ''
       Virtual CPUs for the builder VM.
 
@@ -62,18 +62,22 @@ in
     description = ''
       Builder VM memory in MiB.
 
-      Upstream defaults to 3072, which a parallel Rust link can exhaust.
+      Only has to hold compiler processes, not build scratch, since `build-dir`
+      points at the data disk. If a build is OOM-killed, lower `maxJobs` before
+      raising this: `cores` already saturates the VM.
     '';
   };
 
   options.nstdl.linuxBuilder.diskSize = lib.mkOption {
     type = lib.types.ints.positive;
-    default = 65536;
+    default = 131072;
     description = ''
       Builder VM data disk in MiB, holding the VM's Nix store and build scratch.
 
-      The file is sparse and created only once, so raising this takes effect
-      only after deleting `nixos.qcow2` in the builder's working directory.
+      Sparse, so it costs only what the guest writes — but it never shrinks
+      back below its high-water mark. Created once, so raising this takes
+      effect only after deleting `nixos.qcow2` in the builder's working
+      directory.
     '';
   };
 
