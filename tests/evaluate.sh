@@ -399,6 +399,11 @@ darwin_home_packages="$(nix eval "${override[@]}" --json --apply 'packages: buil
 darwin_brews="$(nix eval "${override[@]}" --json --apply 'brews: builtins.map (brew: brew.name) brews' "${fixture}#darwinConfigurations.test-darwin.config.homebrew.brews")"
 darwin_activation_script="$(nix eval "${override[@]}" --raw "${fixture}#darwinConfigurations.test-darwin.config.system.activationScripts.script.text")"
 darwin_nushell_config="$(nix eval "${override[@]}" --raw "${fixture}#darwinConfigurations.test-darwin.config.home-manager.users.tester.programs.nushell.extraConfig")"
+darwin_linux_builder_enabled="$(nix eval "${override[@]}" --json "${fixture}#darwinConfigurations.test-darwin.config.nix.linux-builder.enable")"
+darwin_linux_builder_systems="$(nix eval "${override[@]}" --json "${fixture}#darwinConfigurations.test-darwin.config.nix.linux-builder.systems")"
+darwin_linux_builder_package="$(nix eval "${override[@]}" --raw "${fixture}#darwinConfigurations.test-darwin.config.nix.linux-builder.package.name")"
+darwin_distributed_builds="$(nix eval "${override[@]}" --json "${fixture}#darwinConfigurations.test-darwin.config.nix.distributedBuilds")"
+darwin_builder_substitutes="$(nix eval "${override[@]}" --json "${fixture}#darwinConfigurations.test-darwin.config.nix.settings.builders-use-substitutes")"
 [[ "${darwin_casks}" == *'"signal"'* ]]
 [[ "${darwin_home_packages}" == *'imagemagick-'* ]]
 for cask in coteditor firefox@developer-edition keka keepassxc linearmouse rustdesk spacedrive spotify visual-studio-code whatsapp; do
@@ -406,6 +411,7 @@ for cask in coteditor firefox@developer-edition keka keepassxc linearmouse rustd
 done
 [[ "${darwin_podman_packages}" == *'"podman-'* && "${darwin_podman_packages}" == *'"podman-compose-'* && "${darwin_podman_packages}" == *'"sleepless-'* && "${darwin_sudo_extra_config}" == *'tester ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1'* && "${darwin_casks}" == *'"codex"'* && "${darwin_casks}" == *'"claude-code@latest"'* && "${darwin_casks}" == *'"claude"'* && "${darwin_casks}" == *'"chatgpt"'* && "${darwin_casks}" == *'"discord"'* && "${darwin_home_packages}" != *'codex-'* && "${darwin_home_packages}" != *'claude-code-'* && "${darwin_brews}" == *'"batt"'* && "${darwin_activation_script}" == *'/etc/batt.json'* && "${darwin_activation_script}" == *'launchctl kickstart -k system/org.nixos.nstdl-batt'* && "${darwin_nushell_config}" == *'extern batt'* ]]
 [[ "${darwin_qui_program}" == *'nstdl-qui-launcher'* && "${darwin_qui_keepalive}" == "true" ]]
+[[ "${darwin_linux_builder_enabled}" == "true" && "${darwin_linux_builder_systems}" == '["x86_64-linux"]' && "${darwin_linux_builder_package}" == "create-builder" && "${darwin_distributed_builds}" == "true" && "${darwin_builder_substitutes}" == "true" ]]
 nix eval "${override[@]}" --raw "${fixture}#homeConfigurations.test-standalone.config.home.username"
 nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.alice.home.username"
 nix eval "${override[@]}" --json "${fixture}#homeConfigurations.test-standalone.config.programs.lazygit.enable"

@@ -213,6 +213,7 @@ in
     ./features/postgresql.nix
     ./features/proxmox-backup.nix
     ./features/remote-access.nix
+    ./features/linux-builder.nix
     (import ./features/sleepless.nix { inherit inputs; })
     ./features/hardware.nix
     (import ./features/capabilities.nix { inherit inputs; })
@@ -301,6 +302,7 @@ in
                     "laptop"
                     "foreign-binaries"
                     "container-development"
+                    "linux-builder"
                     "remote-desktop"
                     "full-stack-developer"
                     "office-suite"

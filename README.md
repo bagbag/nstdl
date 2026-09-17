@@ -66,10 +66,12 @@ only when that recovery path is required.
 `role` is exclusive: choose `server` or `workstation`. `features` are
 additive. `developer` provides system tooling; add it to an account's
 `home.features` when that person's Home Manager profile should receive the
-opinionated terminal configuration. `virtualization` is the one portable host
-selector: use `"none"` (the default), `"qemu"`, or `"vmware"` to enable the
-corresponding NixOS guest agent. Redistributable device firmware is enabled on
-physical hosts and omitted from QEMU and VMware guests. A host module remains
+opinionated terminal configuration. On Darwin, `linux-builder` enables the
+local Virtualization.framework builder for `x86_64-linux`. `virtualization` is
+the one portable host selector: use `"none"` (the default), `"qemu"`, or
+`"vmware"` to enable the corresponding NixOS guest agent. Redistributable
+device firmware is enabled on physical hosts and omitted from QEMU and VMware
+guests. A host module remains
 the place for all other host facts.
 
 The resulting configuration is available as `.#nixosConfigurations.app-01`.
