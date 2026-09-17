@@ -210,6 +210,7 @@ in
     ./features/podman.nix
     ./features/qui.nix
     ./features/battery-charge-limit.nix
+    ./features/paradedb.nix
     ./features/postgresql.nix
     ./features/proxmox-backup.nix
     ./features/remote-access.nix
@@ -293,6 +294,7 @@ in
                     "podman"
                     "qui"
                     "battery-charge-limit"
+                    "paradedb"
                     "postgresql"
                     "proxmox-backup"
                     "remote-access"

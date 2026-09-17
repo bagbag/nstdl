@@ -19,6 +19,12 @@ in
   options.services.nstdl.postgresql = {
     enable = lib.mkEnableOption "nstdl PostgreSQL role and database management";
 
+    vectorchord = lib.mkEnableOption ''
+      the VectorChord vector-index extension.
+
+      Creating it in a database is `databases.<name>.extensions = [ "vchord" ]`
+    '';
+
     roles = lib.mkOption {
       type = lib.types.attrsOf (
         lib.types.submodule (
@@ -117,6 +123,16 @@ in
     ];
     services.postgresql = {
       enable = true;
+
+      # VectorChord depends on pgvector and refuses `LOAD`. No `mkDefault`
+      # on the preload: the option merges by concatenation, so a default would
+      # be discarded as soon as anything else preloads a library.
+      extensions = lib.mkIf cfg.vectorchord (ps: [
+        ps.pgvector
+        ps.vectorchord
+      ]);
+      settings.shared_preload_libraries = lib.mkIf cfg.vectorchord [ "vchord.so" ];
+
       ensureDatabases = lib.attrNames managedDatabases;
       ensureUsers = lib.mapAttrsToList (name: role: {
         inherit name;
