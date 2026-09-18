@@ -68,6 +68,11 @@ in
       # the option merges by concatenation, so a default would be discarded as
       # soon as anything else preloads a library.
       settings.shared_preload_libraries = [ "pg_search" ];
+
+      # The unit denies `@resources`, and preloading pg_search calls `mbind`
+      # from it: without this, postgres is killed with SIGSYS at startup. Only
+      # the one call is re-allowed, as nixpkgs does for citus.
+      systemCallFilter.mbind = true;
     };
   };
 }
