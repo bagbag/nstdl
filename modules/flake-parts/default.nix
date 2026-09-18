@@ -45,9 +45,11 @@ let
     in
     {
       home-manager.users = lib.mapAttrs (name: user: {
-        imports = homeModulesFor user.home.features ++ lib.optionals (
-          platform == "darwin" && hasFeature "battery-charge-limit" host
-        ) [ ../home-manager/features/batt.nix ];
+        imports =
+          homeModulesFor user.home.features
+          ++ lib.optionals (platform == "darwin" && hasFeature "battery-charge-limit" host) [
+            ../home-manager/features/batt.nix
+          ];
         _module.args.nstdlLocale = host.locale;
         home = {
           username = name;
@@ -210,6 +212,7 @@ in
     ./features/podman.nix
     ./features/qui.nix
     ./features/battery-charge-limit.nix
+    ./features/systemd-sandbox.nix
     ./features/paradedb.nix
     ./features/postgresql.nix
     ./features/proxmox-backup.nix
@@ -294,6 +297,7 @@ in
                     "podman"
                     "qui"
                     "battery-charge-limit"
+                    "systemd-sandbox"
                     "paradedb"
                     "postgresql"
                     "proxmox-backup"
