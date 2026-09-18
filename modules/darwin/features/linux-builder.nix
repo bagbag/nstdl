@@ -87,6 +87,41 @@ in
     description = "Derivations the builder runs concurrently.";
   };
 
+  options.nstdl.linuxBuilder.supportedFeatures = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    default = [
+      "benchmark"
+      "big-parallel"
+      "nixos-test"
+    ];
+    example = [
+      "benchmark"
+      "big-parallel"
+      "kvm"
+      "nixos-test"
+    ];
+    description = ''
+      Features advertised to Nix for this builder. A derivation requesting a
+      feature that is not listed will not be scheduled here.
+
+      Two deliberate differences from the upstream default of
+      `[ "kvm" "benchmark" "big-parallel" ]`:
+
+      - `kvm` is absent. Virtualization.framework exposes no nested
+        virtualisation, so the guest has no `/dev/kvm` and no kvm module.
+        Advertising it means every derivation requiring kvm is dispatched here
+        and then fails. Add it back only after confirming `/dev/kvm` exists
+        inside the VM — check rather than assume, since it depends on the host
+        chip, the macOS version and whether the builder package enables it.
+      - `nixos-test` is present. `qemu.forceAccel` defaults to false, so a
+        NixOS VM test falls back to TCG and runs here unaccelerated, provided
+        the test also drops `kvm` from its own `requiredFeatures`:
+        `requiredFeatures.kvm = lib.mkForce false`. Prefer an aarch64-linux
+        test — under TCG an x86_64 guest means full cross-architecture
+        emulation, while aarch64-on-aarch64 does not.
+    '';
+  };
+
   options.nstdl.linuxBuilder.bootstrap = lib.mkOption {
     type = lib.types.bool;
     default = false;
@@ -175,6 +210,8 @@ in
         "x86_64-linux"
       ];
       maxJobs = cfg.maxJobs;
+
+      supportedFeatures = cfg.supportedFeatures;
 
       config = {
         # Sizing is free: it feeds the host-side runner and `vzvm.json` only,
