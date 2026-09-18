@@ -41,6 +41,16 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Rust toolchain for the pgrx-based PostgreSQL extensions. pgrx 0.19
+    # declares rust-version 1.96, which nixpkgs release branches lag behind, and
+    # a consumer's `nixpkgs.follows` drags this flake's nixpkgs down to theirs —
+    # so the toolchain cannot come from nixpkgs. Expressed as a version rather
+    # than as a nixpkgs revision that happens to carry one.
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     nix-darwin = {
       url = "github:nix-darwin/nix-darwin";
       inputs.nixpkgs.follows = "nixpkgs";

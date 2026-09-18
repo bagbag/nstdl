@@ -12,6 +12,7 @@
   fetchFromGitHub,
   fetchurl,
   lib,
+  openblas,
   pkg-config,
   postgresql,
 }:
@@ -76,6 +77,10 @@ buildPgrxExtension (finalAttrs: {
   ];
 
   nativeBuildInputs = [ pkg-config ];
+
+  # 0.25.9 links its vector paths against BLAS; without this the extension
+  # compiles and then fails at link with `cannot find -lopenblas`.
+  buildInputs = [ openblas ];
 
   # pgrx tests try to install the extension into the postgresql store path.
   doCheck = false;

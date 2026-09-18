@@ -213,7 +213,7 @@ in
     ./features/qui.nix
     ./features/battery-charge-limit.nix
     ./features/systemd-sandbox.nix
-    ./features/paradedb.nix
+    (import ./features/paradedb.nix { inherit inputs; })
     ./features/postgresql.nix
     ./features/proxmox-backup.nix
     ./features/remote-access.nix

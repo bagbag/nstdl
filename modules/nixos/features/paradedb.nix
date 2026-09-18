@@ -1,3 +1,4 @@
+{ inputs }:
 {
   config,
   lib,
@@ -8,13 +9,36 @@
 let
   cfg = config.services.nstdl.paradedb;
 
-  cargo-pgrx_0_19_0 = pkgs.callPackage ../../../packages/cargo-pgrx-0_19_0.nix { };
+  # pgrx 0.19 declares rust-version 1.96 and errors out below it. The toolchain
+  # cannot come from nixpkgs: a consumer's `nixpkgs.follows` pulls this flake's
+  # nixpkgs down to theirs, and release branches lag. Only cargo and rustc are
+  # taken, so nothing else on the host changes compiler.
+  fenixPkgs = inputs.fenix.packages.${pkgs.stdenv.hostPlatform.system};
+  rustToolchain = fenixPkgs.combine [
+    fenixPkgs.stable.cargo
+    fenixPkgs.stable.rustc
+  ];
 
-  # Built against the host's own PostgreSQL, not a pinned one.
-  pgPkgs = config.services.postgresql.package.pkgs;
+  # Scoped to this evaluation rather than `nixpkgs.overlays`, which would put
+  # every Rust package on the host through a different compiler. Only
+  # derivations that consume `rustPlatform` are affected — here, cargo-pgrx and
+  # the extension — and `buildPgrxExtension` picks it up because it is
+  # `callPackage`d from this same set.
+  rustPkgs = pkgs.extend (
+    _: prev: {
+      rustPlatform = prev.makeRustPlatform {
+        cargo = rustToolchain;
+        rustc = rustToolchain;
+      };
+    }
+  );
 
-  pg_search = pgPkgs.callPackage ../../../packages/pg-search-0_25.nix {
+  cargo-pgrx_0_19_0 = rustPkgs.callPackage ../../../packages/cargo-pgrx-0_19_0.nix { };
+
+  pg_search = rustPkgs.callPackage ../../../packages/pg-search-0_25.nix {
     inherit cargo-pgrx_0_19_0;
+    # Built against the host's own PostgreSQL, not the one in `rustPkgs`.
+    postgresql = config.services.postgresql.package;
   };
 in
 {
