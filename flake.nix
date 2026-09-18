@@ -67,5 +67,16 @@
     {
       flakeModules.default = import ./modules/flake-parts/default.nix { inherit inputs; };
 
+      # Individually consumable, for repositories that are not themselves built
+      # on the flake-parts module above. The motivating case is an application's
+      # NixOS VM test: nixpkgs' pg_search trails ParadeDB by several minor
+      # versions on a release channel, so a test using it exercises a different
+      # extension than the host serves.
+      #
+      # A NixOS module rather than a package output on purpose — the feature
+      # builds the extension against `config.services.postgresql.package`, and a
+      # bare package would have to guess a PostgreSQL version and could load
+      # against the wrong server.
+      nixosModules.paradedb = import ./modules/nixos/features/paradedb.nix { inherit inputs; };
     };
 }
