@@ -63,6 +63,26 @@
             rekeyFile = ./server-admin-password-hash;
             access.test-secrets.users = [ "postgres" ];
           };
+          # Generated, admin-only passphrase and the hash derived from it.
+          items.console-password = {
+            rekeyFile = ./. + "/secrets/console-password.age";
+            generator.type = "passphrase";
+          };
+          items.console-password-hash = {
+            rekeyFile = ./. + "/secrets/console-password-hash.age";
+            generator = {
+              type = "password-hash";
+              from = "console-password";
+            };
+          };
+          items.user-password = {
+            rekeyFile = ./. + "/secrets/user-password.age";
+            generator = {
+              type = "random";
+              format = "alphanumeric-lowercase";
+              length = 25;
+            };
+          };
           storage.root = ./. + "/secrets/rekeyed";
         };
 

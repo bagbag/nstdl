@@ -535,12 +535,25 @@ in
     ];
 
     perSystem =
-      { config, system, ... }:
       {
-        packages.agenix-rekey = config.agenix-rekey.package;
-        apps.agenix-rekey = {
+        config,
+        pkgs,
+        system,
+        ...
+      }:
+      let
+        nstdl = pkgs.callPackage ../../packages/nstdl {
+          manifest = pkgs.writeText "nstdl-manifest.json" (builtins.toJSON nstdlSecrets.manifest);
+          agenix = lib.getExe config.agenix-rekey.package;
+        };
+      in
+      {
+        # The single entry point; agenix-rekey's own app stays unexposed
+        # because its `generate` can silently regenerate existing secrets.
+        packages.nstdl = nstdl;
+        apps.nstdl = {
           type = "app";
-          program = "${config.agenix-rekey.package}/bin/agenix";
+          program = lib.getExe nstdl;
         };
         checks = nstdlDeployment.checksFor {
           inherit inputs system;

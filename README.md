@@ -169,11 +169,22 @@ nstdl = {
     };
     items.database-password = {
       rekeyFile = ./secrets/database-password.age;
+      generator = { type = "random"; bytes = 32; };
       access.app-01 = {
         users = [ "postgres" ];
         owner = "postgres";
         mode = "0440";
       };
+    };
+    # Admin-only passphrase; only the hash derived from it reaches the host.
+    items.console-password = {
+      rekeyFile = ./secrets/console-password.age;
+      generator.type = "passphrase";
+    };
+    items.console-password-hash = {
+      rekeyFile = ./secrets/console-password-hash.age;
+      generator = { type = "password-hash"; from = "console-password"; };
+      access.app-01.mode = "0400";
     };
   };
 
@@ -185,9 +196,52 @@ nstdl = {
 ```
 
 An ACL controls runtime materialisation only; it does not make a service or
-server an encryption recipient. Use `nix run .#agenix-rekey -- edit` and
-`nix run .#agenix-rekey -- rekey` from the consuming flake. Keep all private
-keys out of Nix configuration.
+server an encryption recipient. Keep all private keys out of Nix configuration.
+
+Secrets are managed with `nstdl secret`, run from the consuming flake's root.
+Commit this wrapper there as an executable `nstdl`:
+
+```sh
+#!/usr/bin/env bash
+cd "$(dirname "$0")" && exec nix run .#nstdl -- "$@"
+```
+
+Never switch it to a `path:` reference: that copies ignored files into the
+world-readable store.
+
+- `./nstdl secret status [--check]` lists every declared secret, missing values
+  and pending rekeys; `--check` exits 3 on drift and is the only command CI may
+  run.
+- `./nstdl secret sync` creates every missing generated value, then rekeys. Run
+  it after any change to the declarations, including a newly granted host.
+- `./nstdl secret set ITEM` stores the first value of an externally issued
+  secret (prompted, or from stdin) or, for a `password-hash` without `from`,
+  hashes a self-chosen password. It never replaces an existing value.
+- `./nstdl secret rotate ITEM` replaces a value: it generates a new one, or
+  asks for it (prompt or stdin) when the value is entered. It asks you to type
+  the name first, unless `--yes` is given, and re-derives the hashes computed
+  from it.
+- `./nstdl secret edit ITEM` changes an externally issued value in `$EDITOR`.
+  The value is written verbatim to a private file for the editor, which is
+  memory-backed on Linux and in `$TMPDIR` on macOS, and removed afterwards.
+  vim, nvim and micro run without backups, swap or undo files and without
+  appending a final newline; with other editors, check their backup and
+  history settings. An unchanged value writes nothing.
+- `./nstdl secret view ITEM` and `verify ITEM` show a value or check a typed
+  password against a stored hash. `rekey` rekeys without other changes.
+
+Generators are `random` (`format` hex, base64 or base64url sized by `bytes`,
+the count the value decodes to, default 32; or alphanumeric or
+alphanumeric-lowercase sized by `length` in characters, at least 80 bits,
+default 20),
+`passphrase`
+(`words` from the EFF long list, space-separated) and `password-hash` (yescrypt,
+from another secret or prompted). A value is created once and never replaced
+unless its item sets `rotate = true`; only `rotate` and `edit` replace, so
+keep it false for keys whose change breaks existing data. Derived
+hashes cannot rotate on their own and follow their source. New files are added
+to git, and every changing command ends with a rekey. agenix-rekey's own
+commands are not exposed: its `generate` can replace existing secrets.
 
 NixOS uses systemd-boot with EFI-variable updates and zram by default. Servers
 use Linux 6.12 LTS; workstations use the latest kernel. See

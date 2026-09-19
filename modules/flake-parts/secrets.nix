@@ -1,6 +1,7 @@
 {
   config,
   lib,
+  self,
   ...
 }:
 let
@@ -119,6 +120,128 @@ let
     pubkey = key.publicKey;
   }) administratorKeys;
 
+  # Byte formats encode random bytes for keys and tokens and are sized in
+  # `bytes` (at least 16, 128 bits). Character formats are for typed passwords,
+  # which are only attackable through a slow yescrypt hash, and are sized in
+  # `length`: at least 80 bits.
+  randomFormats = {
+    hex.sizing = "bytes";
+    base64.sizing = "bytes";
+    base64url.sizing = "bytes";
+    alphanumeric = {
+      sizing = "length";
+      minimumLength = 14;
+    };
+    alphanumeric-lowercase = {
+      sizing = "length";
+      minimumLength = 16;
+    };
+  };
+
+  validateItems =
+    let
+      problems = lib.concatLists (
+        lib.mapAttrsToList (
+          name: item:
+          let
+            generator = item.generator;
+            from = if generator == null then null else generator.from;
+            source = if from == null then null else secretPolicy.items.${from} or null;
+          in
+          lib.optional (from != null && generator.type != "password-hash")
+            "nstdl secret '${name}': generator.from is only valid for type password-hash"
+          ++ lib.optional (from != null && source == null)
+            "nstdl secret '${name}': generator.from references unknown secret '${from}'"
+          ++ lib.optional (
+            source != null && source.generator != null && source.generator.type == "password-hash"
+          ) "nstdl secret '${name}': generator.from must name a plaintext secret, not the hash '${from}'"
+          ++ lib.optional (from != null && item.rotate)
+            "nstdl secret '${name}': a derived secret cannot set rotate; it follows its source '${from}'"
+          ++ lib.optional (
+            generator != null
+            && generator.type == "random"
+            && randomFormats.${generator.format}.sizing == "bytes"
+            && generator.length != null
+          ) "nstdl secret '${name}': ${generator.format} is sized with generator.bytes, not length"
+          ++ lib.optional (
+            generator != null
+            && generator.type == "random"
+            && randomFormats.${generator.format}.sizing == "length"
+            && generator.bytes != null
+          ) "nstdl secret '${name}': ${generator.format} is sized with generator.length, not bytes"
+          ++ lib.optional (
+            generator != null
+            && generator.type == "random"
+            && generator.length != null
+            && generator.length < randomFormats.${generator.format}.minimumLength or 0
+          ) "nstdl secret '${name}': a ${generator.format} length below ${
+            toString randomFormats.${generator.format}.minimumLength
+          } is weaker than 80 bits"
+        ) secretPolicy.items
+      );
+    in
+    if problems == [ ] then true else throw (lib.concatStringsSep "\n" problems);
+
+  # Canonical files are addressed relative to the consumer flake, which is also
+  # where the CLI runs. Context is dropped: the manifest records locations, it
+  # must not pull the consumer's source into its closure.
+  flakeRelative =
+    what: path:
+    let
+      root = toString self + "/";
+      absolute = toString path;
+    in
+    if lib.hasPrefix root absolute then
+      builtins.unsafeDiscardStringContext (lib.removePrefix root absolute)
+    else
+      throw "nstdl secrets: ${what} (${absolute}) must lie inside the consuming flake";
+
+  # Everything `nstdl secret` needs, fixed at evaluation time so the command
+  # follows the consumer's lock and never evaluates a host system itself.
+  manifest = builtins.seq validateItems {
+    recipients = lib.unique (
+      map canonicalRecipient (map (key: key.publicKey) administratorKeys ++ secretPolicy.recoveryRecipients)
+    );
+    identities = lib.unique (map (key: key.identity) administratorKeys);
+    items = lib.mapAttrs (name: item: {
+      file = flakeRelative "secret '${name}' rekeyFile" item.rekeyFile;
+      inherit (item) rotate;
+      generator =
+        if item.generator == null then
+          null
+        else
+          {
+            inherit (item.generator)
+              type
+              format
+              words
+              from
+              ;
+            bytes =
+              if randomFormats.${item.generator.format}.sizing == "bytes" then
+                lib.defaultTo 32 item.generator.bytes
+              else
+                null;
+            length =
+              if randomFormats.${item.generator.format}.sizing == "length" then
+                lib.defaultTo 20 item.generator.length
+              else
+                null;
+          };
+      # Mirrors agenix-rekey's local storage naming so `status` can tell a
+      # missing rekey without evaluating hosts (checked by tests/evaluate.sh).
+      hosts = lib.mapAttrsToList (hostName: _: {
+        name = hostName;
+        pubkey = config.nstdl.hosts.${hostName}.secrets.hostPubkey;
+        rekeyedDir =
+          if secretPolicy.storage.mode == "local" then
+            flakeRelative "nstdl.secrets.storage.root" secretPolicy.storage.root + "/${hostName}"
+          else
+            null;
+      }) item.access;
+    }) secretPolicy.items;
+  };
+
   moduleFor =
     host:
     if hasFeature "secrets" host then
@@ -232,6 +355,54 @@ in
               type = types.path;
               description = "Canonical encrypted source managed by agenix-rekey.";
             };
+            generator = mkOption {
+              type = types.nullOr (
+                types.submodule {
+                  options = {
+                    type = mkOption {
+                      type = types.enum [
+                        "random"
+                        "passphrase"
+                        "password-hash"
+                      ];
+                      description = "`random`: random bytes; `passphrase`: random words; `password-hash`: a yescrypt crypt hash.";
+                    };
+                    format = mkOption {
+                      type = types.enum (lib.attrNames randomFormats);
+                      default = "hex";
+                      description = "random: `hex`, `base64` and `base64url` encode random bytes; `alphanumeric` (a-zA-Z0-9) and `alphanumeric-lowercase` (a-z0-9) pick characters.";
+                    };
+                    bytes = mkOption {
+                      type = types.nullOr (types.ints.between 16 1024);
+                      default = null;
+                      description = "random, byte formats only: number of random bytes the value decodes to. Default 32.";
+                    };
+                    length = mkOption {
+                      type = types.nullOr (types.ints.between 1 4096);
+                      default = null;
+                      description = "random, character formats only: number of characters, each drawn uniformly; at least 80 bits (alphanumeric 14, alphanumeric-lowercase 16). Default 20.";
+                    };
+                    words = mkOption {
+                      type = types.ints.between 4 16;
+                      default = 6;
+                      description = "passphrase: number of words (EFF long list, space-separated, so it types identically on any keyboard layout).";
+                    };
+                    from = mkOption {
+                      type = types.nullOr types.str;
+                      default = null;
+                      description = "password-hash: the secret whose value is hashed. Null means `nstdl secret set` prompts for the password.";
+                    };
+                  };
+                }
+              );
+              default = null;
+              description = "How `nstdl secret` creates the value. Null: an externally issued value, provided with `nstdl secret set`.";
+            };
+            rotate = mkOption {
+              type = types.bool;
+              default = false;
+              description = "Whether an existing value may ever be replaced (`rotate`, `edit`). Keep false for values whose change breaks existing data, such as encryption keys.";
+            };
             access = mkOption {
               type = types.attrsOf (
                 types.submodule {
@@ -283,6 +454,7 @@ in
 
   config._module.args.nstdlSecrets = {
     inherit
+      manifest
       moduleFor
       validateAccessHosts
       validateHost

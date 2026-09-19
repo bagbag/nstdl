@@ -3,7 +3,9 @@ set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fixture="path:${repo_dir}/tests/fixture-flake"
-override=(--override-input nstdl "path:${repo_dir}" --no-write-lock-file)
+# Lix 2.95.2 rebuilds string context wrongly on eval-cache hits ("store path … has a name longer than
+# 211 characters"), so reruns against an unchanged tree fail; edits change the fingerprint anyway.
+override=(--override-input nstdl "path:${repo_dir}" --no-write-lock-file --no-eval-cache)
 
 nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-server.config.system.build.toplevel.drvPath"
 direct_host_name="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-direct.config.networking.hostName")"
@@ -305,12 +307,12 @@ nix build --no-link "${pbs_wrapper_drv}^out"
 pbs_wrapper="$(nix-store -q --outputs "${pbs_wrapper_drv}")"
 pbs_wrapper_test="$(mktemp)"
 trap 'rm -f "${pbs_wrapper_test}"' EXIT
-sed '/^exec .*systemd-run /c\printf "%s\\n" "$@"' "${pbs_wrapper}/bin/proxmox-backup-client-system" > "${pbs_wrapper_test}"
-chmod +x "${pbs_wrapper_test}"
+# awk and the host bash instead of GNU sed and the Linux shebang, so this also runs on darwin.
+awk '/^exec .*systemd-run / { print "printf \"%s\\n\" \"$@\""; next } { print }' "${pbs_wrapper}/bin/proxmox-backup-client-system" > "${pbs_wrapper_test}"
 
-pbs_wrapper_default="$(${pbs_wrapper_test} backup root.pxar:/)"
-pbs_wrapper_override="$(${pbs_wrapper_test} backup root.pxar:/ --ns=alternate --keyfd=3)"
-pbs_wrapper_snapshot="$(${pbs_wrapper_test} snapshot upload-log)"
+pbs_wrapper_default="$(bash "${pbs_wrapper_test}" backup root.pxar:/)"
+pbs_wrapper_override="$(bash "${pbs_wrapper_test}" backup root.pxar:/ --ns=alternate --keyfd=3)"
+pbs_wrapper_snapshot="$(bash "${pbs_wrapper_test}" snapshot upload-log)"
 [[ "${pbs_wrapper_default}" == *$'--ns\nservers'* && "${pbs_wrapper_default}" == *$'--keyfile\n/run/agenix/pbs-key'* ]]
 [[ "${pbs_wrapper_override}" != *"servers"* && "${pbs_wrapper_override}" != *"/run/agenix/pbs-key"* ]]
 [[ "${pbs_wrapper_snapshot}" == *$'--ns\nservers'* && "${pbs_wrapper_snapshot}" == *$'--keyfile\n/run/agenix/pbs-key'* ]]
@@ -411,12 +413,31 @@ for cask in coteditor firefox@developer-edition keka keepassxc linearmouse rustd
 done
 [[ "${darwin_podman_packages}" == *'"podman-'* && "${darwin_podman_packages}" == *'"podman-compose-'* && "${darwin_podman_packages}" == *'"sleepless-'* && "${darwin_sudo_extra_config}" == *'tester ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1'* && "${darwin_casks}" == *'"codex"'* && "${darwin_casks}" == *'"claude-code@latest"'* && "${darwin_casks}" == *'"claude"'* && "${darwin_casks}" == *'"chatgpt"'* && "${darwin_casks}" == *'"discord"'* && "${darwin_home_packages}" != *'codex-'* && "${darwin_home_packages}" != *'claude-code-'* && "${darwin_brews}" == *'"batt"'* && "${darwin_activation_script}" == *'/etc/batt.json'* && "${darwin_activation_script}" == *'launchctl kickstart -k system/org.nixos.nstdl-batt'* && "${darwin_nushell_config}" == *'extern batt'* ]]
 [[ "${darwin_qui_program}" == *'nstdl-qui-launcher'* && "${darwin_qui_keepalive}" == "true" ]]
-[[ "${darwin_linux_builder_enabled}" == "true" && "${darwin_linux_builder_systems}" == '["x86_64-linux"]' && "${darwin_linux_builder_package}" == "create-builder" && "${darwin_distributed_builds}" == "true" && "${darwin_builder_substitutes}" == "true" ]]
+[[ "${darwin_linux_builder_enabled}" == "true" && "${darwin_linux_builder_systems}" == '["aarch64-linux","x86_64-linux"]' && "${darwin_linux_builder_package}" == "create-builder" && "${darwin_distributed_builds}" == "true" && "${darwin_builder_substitutes}" == "true" ]]
 nix eval "${override[@]}" --raw "${fixture}#homeConfigurations.test-standalone.config.home.username"
 nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.alice.home.username"
 nix eval "${override[@]}" --json "${fixture}#homeConfigurations.test-standalone.config.programs.lazygit.enable"
-nix eval "${override[@]}" --raw "${fixture}#packages.x86_64-linux.agenix-rekey.drvPath"
 nix eval "${override[@]}" --raw "${fixture}#agenix-rekey.x86_64-linux.rekey.drvPath"
+[[ "$(nix eval "${override[@]}" --json "${fixture}#apps.x86_64-linux" --apply builtins.attrNames)" == '["nstdl"]' ]]
+
+# nstdl CLI: unit tests, then the built command against a copy of the fixture.
+# `status` must name rekeyed files exactly as agenix-rekey does, whose
+# expected path the failing host evaluation reports.
+host_system="$(nix eval --impure --raw --expr builtins.currentSystem)"
+nix build "${override[@]}" --no-link "${fixture}#packages.${host_system}.nstdl.tests.unit"
+nstdl_bin="$(nix build "${override[@]}" --no-link --print-out-paths "${fixture}#packages.${host_system}.nstdl")/bin/nstdl"
+rekeyed_name="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-secrets.config.age.secrets.database-password.file" 2>&1 | grep -o '[0-9a-f]\{32\}-database-password\.age' | head -1 || true)"
+[[ -n "${rekeyed_name}" ]]
+nstdl_fixture="$(mktemp -d)"
+cp -R "${repo_dir}/tests/fixture-flake/." "${nstdl_fixture}"
+chmod -R u+w "${nstdl_fixture}"
+touch "${nstdl_fixture}/secrets/rekeyed/test-secrets/${rekeyed_name}"
+nstdl_status="$(cd "${nstdl_fixture}" && "${nstdl_bin}" secret status)"
+rm -rf "${nstdl_fixture}"
+grep -Eq '^database-password +ok +test-secrets$' <<<"${nstdl_status}"
+grep -Eq '^console-password +missing: run sync +-$' <<<"${nstdl_status}"
+grep -Eq '^console-password-hash +missing: run sync +-$' <<<"${nstdl_status}"
+grep -Eq '^user-password +missing: run sync +-$' <<<"${nstdl_status}"
 
 nix eval --impure --raw --expr "
   let
@@ -477,13 +498,14 @@ nix eval --impure --raw --expr "
   }).config.system.primaryUser
 "
 
-nix eval --override-input nstdl "path:${repo_dir}" --no-write-lock-file --raw "path:${repo_dir}/example#nixosConfigurations.demo-server.config.system.build.toplevel.drvPath"
+nix eval --override-input nstdl "path:${repo_dir}" --no-write-lock-file --no-eval-cache --raw "path:${repo_dir}/example#nixosConfigurations.demo-server.config.system.build.toplevel.drvPath"
 
 stable_override=(
   --override-input nstdl "path:${repo_dir}"
   --override-input nstdl/nixpkgs github:NixOS/nixpkgs/nixos-26.05
   --override-input nstdl/home-manager github:nix-community/home-manager/release-26.05
   --no-write-lock-file
+  --no-eval-cache
 )
 nix eval "${stable_override[@]}" --raw "${fixture}#homeConfigurations.test-standalone.config.home.activationPackage.drvPath"
 stable_fzf_enabled="$(nix eval "${stable_override[@]}" --json "${fixture}#homeConfigurations.test-standalone.config.programs.fzf.enable")"
