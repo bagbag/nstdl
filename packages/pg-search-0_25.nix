@@ -82,6 +82,26 @@ buildPgrxExtension (finalAttrs: {
   # compiles and then fails at link with `cannot find -lopenblas`.
   buildInputs = [ openblas ];
 
+  # ...and `buildInputs` alone only gets it past the link. Since 1.90 rustc
+  # links x86_64-linux with its own bundled rust-lld, which never reaches
+  # nixpkgs' ld wrapper, so no RUNPATH is written at all — not a missing entry,
+  # an empty one (rust-lang/rust#162781, unfixed in nixpkgs e554fab7 with rustc
+  # 1.98.1). `libopenblas.so.0` is then unresolvable at load time, and because
+  # the module preloads pg_search postgres does not degrade: it refuses to
+  # start. Opting out of the bundled linker puts the link back through the
+  # wrapper, which derives the RPATH from `buildInputs` itself.
+  #
+  # Preferred over naming openblas' path here: it cannot drift from the
+  # dependency set, and it covers every library this extension links rather
+  # than only the one that happened to break. openblas is not optional —
+  # pg_search/Cargo.toml pulls `superkmeans` with `features = ["openblas"]`
+  # for `cfg(not(target_os = "macos"))`.
+  #
+  # Retire when nixpkgs teaches the cc wrapper to pass `-rpath` to rust-lld,
+  # or rustc stops bypassing it. `buildPgrxExtension` sets RUSTFLAGS on Darwin
+  # only, and appends there, so claiming it here is safe.
+  env.RUSTFLAGS = "-C linker-features=-lld -C link-self-contained=-linker";
+
   # pgrx tests try to install the extension into the postgresql store path.
   doCheck = false;
 
