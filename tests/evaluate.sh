@@ -439,6 +439,44 @@ grep -Eq '^console-password +missing: run sync +-$' <<<"${nstdl_status}"
 grep -Eq '^console-password-hash +missing: run sync +-$' <<<"${nstdl_status}"
 grep -Eq '^user-password +missing: run sync +-$' <<<"${nstdl_status}"
 
+# Garage feature: its VM test evaluates everywhere and runs on Linux, and key
+# IDs Garage would refuse to import are rejected at evaluation.
+nix eval --no-eval-cache --raw "path:${repo_dir}#checks.x86_64-linux.garage.drvPath" >/dev/null
+if [[ "${host_system}" == *-linux ]]; then
+  nix build --no-eval-cache --no-link "path:${repo_dir}#checks.${host_system}.garage"
+fi
+invalid_garage_output="$(mktemp)"
+if nix eval --impure --expr "
+  let
+    flake = builtins.getFlake \"path:${repo_dir}\";
+  in
+  (flake.inputs.nixpkgs.lib.nixosSystem {
+    system = \"x86_64-linux\";
+    modules = [
+      flake.nixosModules.garage
+      {
+        services.nstdl.garage = {
+          enable = true;
+          rpcSecretFile = \"/run/rpc\";
+          adminTokenFile = \"/run/admin\";
+          keys.short.secretKeyFile = \"/run/short\";
+        };
+        boot.loader.grub.devices = [ \"nodev\" ];
+        fileSystems.\"/\" = {
+          device = \"/dev/null\";
+          fsType = \"ext4\";
+        };
+        system.stateVersion = \"25.11\";
+      }
+    ];
+  }).config.system.build.toplevel.drvPath
+" >"${invalid_garage_output}" 2>&1; then
+  echo "a Garage key ID shorter than 8 characters must be rejected" >&2
+  exit 1
+fi
+grep -q 'key IDs need at least 8 characters' "${invalid_garage_output}"
+rm -f "${invalid_garage_output}"
+
 nix eval --impure --raw --expr "
   let
     flake = builtins.getFlake \"path:${repo_dir}\";

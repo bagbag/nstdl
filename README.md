@@ -294,6 +294,13 @@ accounts, and optional root break-glass access.
   credentials, so their contents cannot enter nstdl's Nix configuration.
 - `proxmox-backup`: typed, credential-backed Proxmox Backup Client jobs and
   one-off client wrappers.
+- `garage`: single-node Garage 2 object storage on loopback (S3 on
+  `127.0.0.1:3900`) with declared buckets and keys. `garage-setup.service`
+  creates them through the admin API and applies each key's permissions on
+  the declared buckets exactly; services using a bucket should require it. It never
+  deletes. The RPC secret, admin token and key secrets are files read as
+  systemd credentials. A key's secret is fixed once imported: Garage cannot
+  re-import a key ID even after deleting it, so a new secret needs a new key ID.
 - `secrets`: ragenix plus agenix-rekey, with explicit host runtime ACLs.
 
 NixOS hosts use an explicit locale policy. Its defaults are English messages,

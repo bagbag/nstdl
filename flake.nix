@@ -78,5 +78,15 @@
       # bare package would have to guess a PostgreSQL version and could load
       # against the wrong server.
       nixosModules.paradedb = import ./modules/nixos/features/paradedb.nix { inherit inputs; };
+
+      # Same reason: an application's VM test can run the host's object storage.
+      nixosModules.garage = ./modules/nixos/features/garage.nix;
+
+      checks = inputs.nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ] (system: {
+        garage = import ./tests/garage.nix {
+          pkgs = inputs.nixpkgs.legacyPackages.${system};
+          module = ./modules/nixos/features/garage.nix;
+        };
+      });
     };
 }
