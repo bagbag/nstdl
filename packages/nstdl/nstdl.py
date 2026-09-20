@@ -232,8 +232,39 @@ class Secrets:
             case "random":
                 return random_value(generator["format"], generator["bytes"], generator["length"])
             case "passphrase":
-                # Space-separated words type identically on any keyboard layout.
-                words = run(["xkcdpass", "--numwords", str(generator["words"]), "--delimiter", " "])
+                # Every parameter is passed explicitly. Left implicit, xkcdpass'
+                # own defaults decide the strength, and they are not the ones to
+                # want: `--min 5 --max 9` is strictly worse on both axes at once.
+                # `--max 9` does nothing (eff-long's longest word is 9
+                # characters), while `--min 5` drops 549 of the 7776 words —
+                # lowering entropy to 76.9 bits AND raising the average length
+                # typed. Dropping the length filter gives 77.5 bits in one
+                # character less.
+                #
+                # `--valid-chars` is composed into `^[a-z]{1,99}$` together with
+                # the length bounds, so it anchors the whole word rather than
+                # its first character. On eff-long it removes exactly four
+                # hyphenated entries (drop-down, felt-tip, t-shirt, yo-yo),
+                # leaving 7772 words and 6 x log2(7772) = 77.5 bits — a cost of
+                # 0.01 bits to lose the words whose spelling is ambiguous to
+                # read back over a console. It also keeps the value ASCII if the
+                # wordlist above is ever changed: ger-anlx, for instance, is
+                # 63% capitalised or umlauted entries. Lowercase and
+                # space-separated so it types identically on whatever keyboard
+                # layout a recovery console offers.
+                #
+                # `--allow-weak-rng` is deliberately never passed: xkcdpass then
+                # fails rather than silently falling back to a weak RNG.
+                words = run([
+                    "xkcdpass",
+                    "--wordfile", "eff-long",
+                    "--min", "1",
+                    "--max", "99",
+                    "--valid-chars", "[a-z]",
+                    "--case", "lower",
+                    "--delimiter", " ",
+                    "--numwords", str(generator["words"]),
+                ])
                 return words.strip()
             case "password-hash":
                 if item.source is None:

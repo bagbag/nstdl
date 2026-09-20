@@ -385,7 +385,13 @@ in
                     words = mkOption {
                       type = types.ints.between 4 16;
                       default = 6;
-                      description = "passphrase: number of words (EFF long list, space-separated, so it types identically on any keyboard layout).";
+                      description = ''
+                        passphrase: number of words drawn from the EFF long list, unfiltered by length and restricted to ASCII (7772 of 7776 words, 12.9 bits each), lowercase and space-separated so the value types identically on any keyboard layout.
+
+                        The default 6 is chosen here rather than inherited from xkcdpass: ~77.5 bits, EFF's stated minimum for this list, and the lowest count that stays out of reach even assuming yescrypt were broken down to a fast primitive. A consumer should not need to set this.
+
+                        Each further word adds 12.9 bits and ~8 characters to type. The floor of 4 (51.7 bits) leans on the hash holding up; it exists for non-password uses, not as a suggestion.
+                      '';
                     };
                     from = mkOption {
                       type = types.nullOr types.str;
