@@ -3,7 +3,8 @@
 Everything about the flake comes from the manifest baked at evaluation time
 ($NSTDL_MANIFEST), so the command follows the consumer's lock and never
 evaluates a host itself; $NSTDL_AGENIX is the agenix-rekey command used to
-rekey.
+rekey and $NSTDL_DEPLOY the deploy-rs binary, present only for a flake that
+declares a deployable host.
 
 Secret values live only in memory and on the stdin of child processes. They
 are never passed as arguments and never written unencrypted, except to the
@@ -69,6 +70,10 @@ class Manifest:
         data = json.loads(Path(path).read_text())
         self.recipients: list[str] = data["recipients"]
         self.identities: list[str] = data["identities"]
+        # Hosts that set `deployment.enable`. Empty for a consumer that only
+        # keeps secrets, which is also why such a flake's wrapper carries no
+        # deploy-rs at all.
+        self.deploy_nodes: list[str] = data["deploy"]["nodes"]
         self.items = {
             name: Item(
                 name=name,
@@ -414,11 +419,56 @@ class Secrets:
         return 0
 
 
+# -- deploy ------------------------------------------------------------------
+#
+# A spelling, not a safeguard. deploy-rs already refuses to deploy a host whose
+# secrets are missing or stale: agenix-rekey asserts on both the canonical file
+# and the content-addressed rekeyed one while the profile is evaluated
+# (`modules/agenix-rekey.nix`, `rekeyedLocalSecret`), and that survives
+# `--skip-checks`, which only drops `nix flake check`. A pre-flight here would
+# re-check the same invariant less precisely — against the working tree rather
+# than the git tree evaluation sees, and across every host rather than the one
+# being deployed. So there is none.
+
+
+def deploy_argv(deploy: str | None, nodes: list[str], host: str, rest: list[str]) -> list[str]:
+    """Everything after the host goes through untouched. deploy-rs' flag
+    surface is large and moves, so a curated copy here would be a second thing
+    to keep in sync, and wrong between updates.
+
+    Declaration before installation: an empty node list is the ordinary state
+    of a secrets-only flake and says so, where a missing binary would blame
+    the build for a flake that simply has nothing to deploy."""
+    if not nodes:
+        raise Failure("no host in this flake sets deployment.enable")
+    if host not in nodes:
+        raise Failure(f"unknown host '{host}'; this flake deploys: {', '.join(sorted(nodes))}")
+    if not deploy:
+        raise Failure("this flake declares a deployable host but its nstdl carries no deploy-rs")
+    # argparse.REMAINDER drops a leading `--` on current Python, but the
+    # behaviour has moved before; dropping it here makes the separator optional
+    # either way.
+    if rest and rest[0] == "--":
+        rest = rest[1:]
+    return [deploy, f".#{host}", *rest]
+
+
+def deploy(manifest: Manifest, host: str, rest: list[str]) -> int:
+    argv = deploy_argv(os.environ.get("NSTDL_DEPLOY"), manifest.deploy_nodes, host, rest)
+    print(f"Deploying {host}...", file=sys.stderr)
+    # exec, not a child: deploy-rs owns the terminal from here — its progress
+    # output, an interactive sudo prompt, the magic-rollback confirmation, and
+    # Ctrl-C reaching the activation rather than this wrapper.
+    os.execv(argv[0], argv)
+
+
 def parser(manifest: Manifest) -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
         prog="nstdl",
-        description="Operations on this flake. Run through the ./nstdl wrapper at the flake root.",
-        epilog="Exit status: 0 success, 1 failure, 2 usage error, 3 drift (secret status --check).",
+        description="Operations on this flake: its age secrets and its deployable hosts. "
+        "Run through the ./nstdl wrapper at the flake root.",
+        epilog="Exit status: 0 success, 1 failure, 2 usage error, 3 drift (secret status --check). "
+        "`deploy` passes deploy-rs's own status through.",
     )
     root.add_argument("--yes", action="store_true", help="allow changes without a terminal and skip confirmations")
     nouns = root.add_subparsers(dest="noun", required=True, metavar="COMMAND")
@@ -437,6 +487,23 @@ def parser(manifest: Manifest) -> argparse.ArgumentParser:
     ):
         verbs.add_parser(verb, help=text).add_argument("item", choices=sorted(manifest.items), metavar="ITEM")
     verbs.add_parser("rekey", help="rekey every secret for its hosts")
+
+    # A noun taking an argument rather than a verb: there is one thing to do to
+    # a host, and `nstdl deploy cloud-nix01` is the whole point of the wrapper.
+    deploy = nouns.add_parser("deploy", help="build and activate a host with deploy-rs")
+    deploy.add_argument(
+        "host",
+        metavar="HOST",
+        help=", ".join(sorted(manifest.deploy_nodes)) or "no host in this flake is deployable",
+    )
+    # Not `choices`: that would also foreclose the flake refs deploy-rs accepts
+    # in this position later. `deploy_argv` validates and names the valid set.
+    deploy.add_argument(
+        "rest",
+        nargs=argparse.REMAINDER,
+        metavar="[-- DEPLOY-RS ARGUMENTS]",
+        help="passed through untouched, e.g. --dry-activate",
+    )
     return root
 
 
@@ -446,6 +513,8 @@ def main(argv: list[str]) -> int:
     try:
         if not Path("flake.nix").is_file():
             raise Failure("run from the flake root (the ./nstdl wrapper does this)")
+        if args.noun == "deploy":
+            return deploy(manifest, args.host, args.rest)
         commands = Secrets(manifest, os.environ["NSTDL_AGENIX"], args.yes)
         match args.verb:
             case "status":

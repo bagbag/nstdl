@@ -544,9 +544,19 @@ in
         ...
       }:
       let
+        # Both deploy facts are derived here, from one source, so they cannot
+        # disagree: a flake with no deployable host gets an empty node list
+        # *and* no deploy-rs, and `nstdl deploy` then explains itself instead
+        # of failing on a missing binary. `attrNames` forces only
+        # `deployment.enable` per host, not the profile paths, so naming the
+        # nodes does not drag a system build into the wrapper.
+        deployNodes = lib.attrNames flakeConfig.flake.deploy.nodes;
         nstdl = pkgs.callPackage ../../packages/nstdl {
-          manifest = pkgs.writeText "nstdl-manifest.json" (builtins.toJSON nstdlSecrets.manifest);
+          manifest = pkgs.writeText "nstdl-manifest.json" (
+            builtins.toJSON (nstdlSecrets.manifest // { deploy.nodes = deployNodes; })
+          );
           agenix = lib.getExe config.agenix-rekey.package;
+          deployRs = if deployNodes == [ ] then null else inputs.deploy-rs.packages.${system}.default;
         };
       in
       {

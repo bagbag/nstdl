@@ -11,6 +11,9 @@
   xkcdpass,
   manifest,
   agenix,
+  # Null for a consumer that declares no deployable host, so a secrets-only
+  # flake never pulls deploy-rs into its wrapper for a verb it cannot run.
+  deployRs ? null,
 }:
 let
   tools = [
@@ -45,5 +48,6 @@ runCommand "nstdl"
     makeWrapper ${script} "$out/bin/nstdl" \
       --prefix PATH : ${lib.makeBinPath tools} \
       --set NSTDL_MANIFEST ${manifest} \
-      --set NSTDL_AGENIX ${agenix}
+      --set NSTDL_AGENIX ${agenix} \
+      ${lib.optionalString (deployRs != null) "--set NSTDL_DEPLOY ${lib.getExe deployRs}"}
   ''

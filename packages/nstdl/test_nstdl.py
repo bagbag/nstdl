@@ -60,6 +60,7 @@ class SecretCommandTest(unittest.TestCase):
                     "secrets/chosen-password-hash.age", {**random, "type": "password-hash"}
                 ),
             },
+            "deploy": {"nodes": ["server"]},
         }
         self.manifest = self.root / "manifest.json"
         self.manifest.write_text(json.dumps(manifest))
@@ -276,7 +277,7 @@ class RotateConfirmationTest(unittest.TestCase):
         self.file = Path(self.directory.name) / "token.age"
         self.file.write_bytes(b"existing")
         manifest = Path(self.directory.name) / "manifest.json"
-        manifest.write_text(json.dumps({"recipients": [], "identities": [], "items": {}}))
+        manifest.write_text(json.dumps({"recipients": [], "identities": [], "items": {}, "deploy": {"nodes": []}}))
         self.secrets = nstdl.Secrets(nstdl.Manifest(str(manifest)), "true", assume_yes=False)
         self.item = nstdl.Item("token", self.file, rotate=True, generator=None, hosts=[])
 
@@ -326,7 +327,7 @@ class StoreTest(unittest.TestCase):
             ["rage-keygen", "-y", str(identity)], check=True, capture_output=True, text=True
         ).stdout.strip()
         manifest = self.root / "manifest.json"
-        manifest.write_text(json.dumps({"recipients": [recipient], "identities": [str(identity)], "items": {}}))
+        manifest.write_text(json.dumps({"recipients": [recipient], "identities": [str(identity)], "items": {}, "deploy": {"nodes": []}}))
         self.secrets = nstdl.Secrets(nstdl.Manifest(str(manifest)), "true", assume_yes=True)
         self.item = nstdl.Item("x", self.root / "x.age", rotate=False, generator=None, hosts=[])
 
@@ -344,6 +345,55 @@ class StoreTest(unittest.TestCase):
             self.secrets.store(self.item, "value", replace=False)
         self.assertEqual(self.item.file.read_bytes(), b"existing")
         self.assertEqual(sorted(os.listdir(self.root)), ["identity.txt", "manifest.json", "x.age"])
+
+
+class DeployArgvTest(unittest.TestCase):
+    """Coverage stops at the argv handed to deploy-rs. The sandbox this suite
+    runs in has no host, no network and no store to activate, so nothing below
+    exercises a deployment — only the string assembly and the two refusals."""
+
+    def setUp(self):
+        sys.path.insert(0, str(SCRIPT.parent))
+        import nstdl
+
+        self.nstdl = nstdl
+
+    def test_host_becomes_a_flake_reference(self):
+        self.assertEqual(
+            self.nstdl.deploy_argv("/nix/store/x/bin/deploy", ["server"], "server", []),
+            ["/nix/store/x/bin/deploy", ".#server"],
+        )
+
+    def test_extra_arguments_pass_through_in_order(self):
+        self.assertEqual(
+            self.nstdl.deploy_argv("deploy", ["server"], "server", ["--dry-activate", "-s"]),
+            ["deploy", ".#server", "--dry-activate", "-s"],
+        )
+
+    def test_a_separating_dash_dash_is_dropped_once(self):
+        # argparse.REMAINDER already strips one on current Python; a second
+        # would be deploy-rs' own argument and must survive.
+        self.assertEqual(
+            self.nstdl.deploy_argv("deploy", ["server"], "server", ["--", "--", "-s"]),
+            ["deploy", ".#server", "--", "-s"],
+        )
+
+    def test_unknown_host_names_the_deployable_ones(self):
+        with self.assertRaises(self.nstdl.Failure) as failure:
+            self.nstdl.deploy_argv("deploy", ["beta", "alpha"], "gamma", [])
+        self.assertIn("alpha, beta", str(failure.exception))
+
+    def test_a_declared_host_without_a_binary_is_a_build_fault(self):
+        # Only reachable if the node list and the wrapper's deploy-rs were
+        # derived apart; the module derives both from one condition.
+        with self.assertRaises(self.nstdl.Failure) as failure:
+            self.nstdl.deploy_argv(None, ["server"], "server", [])
+        self.assertIn("carries no deploy-rs", str(failure.exception))
+
+    def test_a_flake_without_deployable_hosts_says_so(self):
+        with self.assertRaises(self.nstdl.Failure) as failure:
+            self.nstdl.deploy_argv("deploy", [], "server", [])
+        self.assertIn("deployment.enable", str(failure.exception))
 
 
 if __name__ == "__main__":

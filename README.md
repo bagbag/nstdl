@@ -143,6 +143,20 @@ nstdl.hosts.app-01 = {
 `network`, `storage`, and `deployment` are NixOS-only. The latter emits a
 `deploy-rs` system profile; complex network topologies remain host-local.
 
+Deploy through the same wrapper the secrets use:
+
+```console
+./nstdl deploy app-01                     # build and activate
+./nstdl deploy app-01 -- --dry-activate   # anything after the host is deploy-rs'
+```
+
+It execs the deploy-rs this flake already locks, so the client matches the
+`activate-rs` baked into the profile and no second nixpkgs is fetched on the
+way. There is no secret pre-flight and deliberately so: agenix-rekey already
+asserts on a missing or stale rekeyed file while the profile is evaluated, and
+that assert survives `--skip-checks`, which only drops `nix flake check`. A
+flake declaring no deployable host carries no deploy-rs in its wrapper at all.
+
 ## Secrets
 
 Select the `secrets` feature only on hosts that materialise runtime secrets.
