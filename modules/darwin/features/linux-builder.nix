@@ -15,34 +15,12 @@ let
   # hostShareDir is shared into the VM at vmShareDir under virtiofs tag
   # `certs`, the only writable host -> VM channel the builder exposes. Used as
   # transport only; a unit in the VM copies each secret to its real path with
-  # the intended ownership. `linux-builder-start` wipes runtimeDir before every
-  # launch, so delivery has to converge rather than run once at activation.
+  # the intended ownership. The VM runner creates hostShareDir and upstream
+  # deletes runtimeDir when the VM stops, so delivery converges on a schedule
+  # and skips while no VM is running.
   runtimeDir = "/run/org.nixos.linux-builder";
   hostShareDir = "${runtimeDir}/certs";
   vmShareDir = "/etc/ssl/certs";
-
-  deliverSecrets = pkgs.writeShellScript "nstdl-builder-sandbox-secrets" (
-    ''
-      set -u
-      mkdir -p ${hostShareDir}
-    ''
-    + lib.concatStringsSep "\n" (
-      lib.mapAttrsToList (name: secret: ''
-        # agenix decrypts from its own launchd daemon, so at activation the
-        # source can lag behind this job.
-        for _ in $(seq 1 60); do
-          [ -r "${secret.sourceFile}" ] && break
-          sleep 1
-        done
-
-        if [ -r "${secret.sourceFile}" ]; then
-          install -m 0400 "${secret.sourceFile}" "${hostShareDir}/${name}"
-        else
-          echo "nstdl: sandbox secret source '${secret.sourceFile}' is not readable; builder will not receive '${name}'" >&2
-        fi
-      '') cfg.sandboxSecrets
-    )
-  );
 in
 {
   options.nstdl.linuxBuilder.cores = lib.mkOption {
@@ -107,12 +85,10 @@ in
       Two deliberate differences from the upstream default of
       `[ "kvm" "benchmark" "big-parallel" ]`:
 
-      - `kvm` is absent. Virtualization.framework exposes no nested
-        virtualisation, so the guest has no `/dev/kvm` and no kvm module.
-        Advertising it means every derivation requiring kvm is dispatched here
-        and then fails. Add it back only after confirming `/dev/kvm` exists
-        inside the VM — check rather than assume, since it depends on the host
-        chip, the macOS version and whether the builder package enables it.
+      - `kvm` is absent. The VM runs without
+        `virtualisation.vz.nestedVirtualization`, so the guest has no
+        `/dev/kvm`. Advertising it means every derivation requiring kvm is
+        dispatched here and then fails.
       - `nixos-test` is present. `qemu.forceAccel` defaults to false, so a
         NixOS VM test falls back to TCG and runs here unaccelerated, provided
         the test also drops `kvm` from its own `requiredFeatures`:
@@ -151,11 +127,13 @@ in
       its build sandbox, for fixed-output derivations that authenticate against
       a private registry.
 
+      Any build on the builder can read these secrets, so this suits a
+      single-user workstation builder, not one shared with untrusted builds.
+
       Only the reference is declarative; the plaintext is decrypted on the host
       and copied in, never evaluated into a store path.
 
-      `extra-sandbox-paths` grants the file to every sandboxed build on this
-      builder, not only the one that needs it.
+      Rotation reaches a running VM within a few minutes.
     '';
     type = lib.types.attrsOf (
       lib.types.submodule (
@@ -195,9 +173,6 @@ in
   };
 
   config = {
-    nix.distributedBuilds = true;
-    nix.settings.builders-use-substitutes = true;
-
     nix.linux-builder = {
       enable = true;
       package = pkgs.darwin.linux-builder-vz;
@@ -213,87 +188,95 @@ in
 
       supportedFeatures = cfg.supportedFeatures;
 
-      config = {
-        # Sizing is free: it feeds the host-side runner and `vzvm.json` only,
-        # leaving the guest closure substitutable. Verified by dry-run.
-        virtualisation.cores = cfg.cores;
-        virtualisation.darwin-builder.memorySize = cfg.memorySize;
-        virtualisation.darwin-builder.diskSize = cfg.diskSize;
+      config = lib.mkMerge [
+        {
+          # Sizing is free: it feeds the host-side runner and `vzvm.json` only,
+          # leaving the guest closure substitutable.
+          virtualisation.cores = cfg.cores;
+          virtualisation.darwin-builder.memorySize = cfg.memorySize;
+          virtualisation.darwin-builder.diskSize = cfg.diskSize;
+        }
 
         # Everything below rewrites the guest's own closure; see `bootstrap`.
-        # `mkIf` on each option rather than on the module as a whole, because
-        # this is a `deferredModule` and a module is not an `mkIf` target.
-        nix.settings = lib.mkIf (!cfg.bootstrap) {
-          # Remote builds arrive as `nix-daemon --stdio` under sshd and so do
-          # not inherit nix-daemon.service's environment; a systemd TMPDIR
-          # override would miss them.
-          build-dir = buildDir;
+        (lib.mkIf (!cfg.bootstrap) {
+          nix.settings = {
+            # The default, /nix/var/nix/builds, is on the tmpfs root.
+            build-dir = buildDir;
 
-          # Trailing `?` marks the mount optional. Without it an undelivered
-          # secret fails every build on this builder, not just the one needing
-          # the credential.
-          extra-sandbox-paths = lib.mapAttrsToList (_: secret: "${secret.path}?") cfg.sandboxSecrets;
-        };
+            # Trailing `?` marks the mount optional. Without it an undelivered
+            # secret fails every build on this builder, not just the one
+            # needing the credential.
+            extra-sandbox-paths = lib.mapAttrsToList (_: secret: "${secret.path}?") cfg.sandboxSecrets;
+          };
 
-        systemd = lib.mkIf (!cfg.bootstrap) (
-          lib.mkMerge [
-            { tmpfiles.rules = [ "d ${buildDir} 0755 root root -" ]; }
+          # `D!` empties it at boot: the disk persists, and builds interrupted
+          # by a VM stop leave their scratch behind.
+          systemd.tmpfiles.rules = [ "D! ${buildDir} 0755 root root -" ];
+        })
 
-            (lib.mkIf (cfg.sandboxSecrets != { }) {
-              # Polled rather than a `systemd.path` unit: virtiofs delivers no
-              # host-side inotify events to the guest, so no watch would see the
-              # host write. Polling also picks up rotated credentials.
-              timers.nstdl-sandbox-secrets = {
-                description = "Poll for nstdl sandbox secrets delivered from the host";
-                wantedBy = [ "timers.target" ];
-                timerConfig = {
-                  OnBootSec = "20s";
-                  OnUnitActiveSec = "2min";
-                };
-              };
+        (lib.mkIf (!cfg.bootstrap && cfg.sandboxSecrets != { }) {
+          # Polled rather than a `systemd.path` unit: virtiofs delivers no
+          # host-side inotify events to the guest, so no watch would see the
+          # host write.
+          systemd.timers.nstdl-sandbox-secrets = {
+            description = "Poll for nstdl sandbox secrets delivered from the host";
+            wantedBy = [ "timers.target" ];
+            timerConfig = {
+              OnBootSec = "20s";
+              OnUnitActiveSec = "2min";
+            };
+          };
 
-              services.nstdl-sandbox-secrets = {
-                description = "Place nstdl sandbox secrets delivered from the host";
-                # Also at boot, so a secret already in the share is in place
-                # before the first build rather than up to OnBootSec later.
-                wantedBy = [ "multi-user.target" ];
-                before = [
-                  "nix-daemon.service"
-                  "sshd.service"
-                ];
-                unitConfig.ConditionPathIsDirectory = vmShareDir;
-                # No RemainAfterExit: the timer must be able to run it again.
-                serviceConfig.Type = "oneshot";
-                script = lib.concatStringsSep "\n" (
-                  lib.mapAttrsToList (name: secret: ''
-                    # Silent unless something changed; this runs on a timer.
-                    if [ -s "${vmShareDir}/${name}" ]; then
-                      # sha256sum, not cmp: diffutils is not on the unit PATH.
-                      if [ "$(sha256sum < "${vmShareDir}/${name}")" != "$(sha256sum < "${secret.path}" 2>/dev/null)" ]; then
-                        install -D -m ${secret.mode} -o root -g ${secret.group} \
-                          "${vmShareDir}/${name}" "${secret.path}"
-                        echo "nstdl: installed sandbox secret '${name}'"
-                      fi
-                    elif [ ! -e "${secret.path}" ]; then
-                      echo "nstdl: sandbox secret '${name}' has not been delivered by the host" >&2
-                    fi
-                  '') cfg.sandboxSecrets
-                );
-              };
-            })
-          ]
-        );
-      };
+          systemd.services.nstdl-sandbox-secrets = {
+            description = "Place nstdl sandbox secrets delivered from the host";
+            # Also at boot, so a secret already in the share is in place
+            # before the first build rather than up to OnBootSec later.
+            wantedBy = [ "multi-user.target" ];
+            before = [ "nix-daemon.service" ];
+            # No RemainAfterExit: the timer must be able to run it again.
+            serviceConfig.Type = "oneshot";
+            script = lib.concatStringsSep "\n" (
+              lib.mapAttrsToList (name: secret: ''
+                # Silent unless something changed; this runs on a timer.
+                if [ -s "${vmShareDir}/${name}" ]; then
+                  # sha256sum, not cmp: diffutils is not on the unit PATH.
+                  if [ "$(sha256sum < "${vmShareDir}/${name}")" != "$(sha256sum < "${secret.path}" 2>/dev/null)" ]; then
+                    install -D -m ${secret.mode} -o root -g ${secret.group} \
+                      "${vmShareDir}/${name}" "${secret.path}"
+                    echo "nstdl: installed sandbox secret '${name}'"
+                  fi
+                elif [ ! -e "${secret.path}" ]; then
+                  echo "nstdl: sandbox secret '${name}' has not been delivered by the host" >&2
+                fi
+              '') cfg.sandboxSecrets
+            );
+          };
+        })
+      ];
     };
 
-    # RunAtLoad covers activation; WatchPaths covers every recreation of
-    # runtimeDir, which a VM launch or host reboot performs.
+    # WatchPaths delivers as soon as a VM launch recreates runtimeDir;
+    # StartInterval picks up rotated secrets and agenix decrypting late.
     launchd = lib.mkIf (cfg.sandboxSecrets != { } && !cfg.bootstrap) {
-      daemons.nstdl-builder-sandbox-secrets.serviceConfig = {
-        ProgramArguments = [ "${deliverSecrets}" ];
-        RunAtLoad = true;
-        WatchPaths = [ runtimeDir ];
-        StandardErrorPath = "/var/log/nstdl-builder-sandbox-secrets.log";
+      daemons.nstdl-builder-sandbox-secrets = {
+        script = ''
+          [ -d ${hostShareDir} ] || exit 0
+        ''
+        + lib.concatStringsSep "\n" (
+          lib.mapAttrsToList (name: secret: ''
+            if [ -r "${secret.sourceFile}" ]; then
+              install -m 0400 "${secret.sourceFile}" "${hostShareDir}/${name}"
+            else
+              echo "nstdl: sandbox secret source '${secret.sourceFile}' is not readable; builder will not receive '${name}'" >&2
+            fi
+          '') cfg.sandboxSecrets
+        );
+        serviceConfig = {
+          RunAtLoad = true;
+          WatchPaths = [ runtimeDir ];
+          StartInterval = 120;
+          StandardErrorPath = "/var/log/nstdl-builder-sandbox-secrets.log";
+        };
       };
     };
   };

@@ -67,7 +67,8 @@ only when that recovery path is required.
 additive. `developer` provides system tooling; add it to an account's
 `home.features` when that person's Home Manager profile should receive the
 opinionated terminal configuration. On Darwin, `linux-builder` enables the
-local Virtualization.framework builder for `x86_64-linux`. `virtualization` is
+local Virtualization.framework builder for `aarch64-linux` and `x86_64-linux`
+(see Profiles). `virtualization` is
 the one portable host selector: use `"none"` (the default), `"qemu"`, or
 `"vmware"` to enable the corresponding NixOS guest agent. Redistributable
 device firmware is enabled on physical hosts and omitted from QEMU and VMware
@@ -150,12 +151,8 @@ Deploy through the same wrapper the secrets use:
 ./nstdl deploy app-01 -- --dry-activate   # anything after the host is deploy-rs'
 ```
 
-It execs the deploy-rs this flake already locks, so the client matches the
-`activate-rs` baked into the profile and no second nixpkgs is fetched on the
-way. There is no secret pre-flight and deliberately so: agenix-rekey already
-asserts on a missing or stale rekeyed file while the profile is evaluated, and
-that assert survives `--skip-checks`, which only drops `nix flake check`. A
-flake declaring no deployable host carries no deploy-rs in its wrapper at all.
+It runs the deploy-rs this flake locks, matching the `activate-rs` in the
+profile. A host whose secrets are missing or not rekeyed fails at evaluation.
 
 ## Secrets
 
@@ -230,7 +227,9 @@ world-readable store.
   it after any change to the declarations, including a newly granted host.
 - `./nstdl secret set ITEM` stores the first value of an externally issued
   secret (prompted, or from stdin) or, for a `password-hash` without `from`,
-  hashes a self-chosen password. It never replaces an existing value.
+  hashes a self-chosen password. A hash derived from an entered value is
+  created by setting that value. `set --replace ITEM` corrects an entered
+  value after you type its name, regardless of `rotate`.
 - `./nstdl secret rotate ITEM` replaces a value: it generates a new one, or
   asks for it (prompt or stdin) when the value is entered. It asks you to type
   the name first, unless `--yes` is given, and re-derives the hashes computed
@@ -238,9 +237,10 @@ world-readable store.
 - `./nstdl secret edit ITEM` changes an externally issued value in `$EDITOR`.
   The value is written verbatim to a private file for the editor, which is
   memory-backed on Linux and in `$TMPDIR` on macOS, and removed afterwards.
-  vim, nvim and micro run without backups, swap or undo files and without
-  appending a final newline; with other editors, check their backup and
-  history settings. An unchanged value writes nothing.
+  vim and nvim (also when reached as `vi`) run with `-n -i NONE` and without
+  backup or undo files, micro without backups; none appends a final newline.
+  With other editors, check their backup and history settings. An unchanged
+  value writes nothing.
 - `./nstdl secret view ITEM` and `verify ITEM` show a value or check a typed
   password against a stored hash. `rekey` rekeys without other changes.
 
@@ -251,11 +251,14 @@ default 20),
 `passphrase`
 (`words` from the EFF long list, space-separated) and `password-hash` (yescrypt,
 from another secret or prompted). A value is created once and never replaced
-unless its item sets `rotate = true`; only `rotate` and `edit` replace, so
-keep it false for keys whose change breaks existing data. Derived
-hashes cannot rotate on their own and follow their source. New files are added
-to git, and every changing command ends with a rekey. agenix-rekey's own
-commands are not exposed: its `generate` can replace existing secrets.
+unless its item sets `rotate = true` (`rotate`, `edit`) or it is an entered
+value corrected with `set --replace`; keep `rotate` false for keys whose change
+breaks existing data. Derived hashes follow their source whenever it changes.
+New files are added to git, and every changing command ends with a rekey —
+deferred, naming what is missing, while a host-granted secret has no value,
+because agenix-rekey refuses to run until all exist. Use `nstdl secret`
+rather than agenix-rekey's own commands: its `generate` can replace existing
+secrets.
 
 NixOS uses systemd-boot with EFI-variable updates and zram by default. Servers
 use Linux 6.12 LTS; workstations use the latest kernel. See
@@ -303,9 +306,28 @@ accounts, and optional root break-glass access.
   uninstall scripts are not included in the installed bundle.
 - `intel`: Intel microcode, iHD VA-API, compute/NPU support, and active
   Intel P-state; `laptop` adds auto-cpufreq and thermald.
-- `postgresql`: typed PostgreSQL roles, databases, memberships, extensions, and
-  local dump backups. Role passwords use runtime files loaded as systemd
-  credentials, so their contents cannot enter nstdl's Nix configuration.
+- `postgresql`: typed PostgreSQL roles, databases, memberships, extensions
+  (created with `CASCADE`), and local dump backups. Role passwords use runtime
+  files loaded as systemd credentials, so their contents cannot enter nstdl's
+  Nix configuration. `vectorchord` adds the VectorChord index extension.
+- `paradedb`: ParadeDB `pg_search`, at the version tstdl's development image
+  runs rather than nixpkgs', built with a fenix toolchain and preloaded.
+  Create it per database through `postgresql`'s `extensions`.
+- `systemd-sandbox`: `services.nstdl.systemd.services.<name>.sandbox` applies a
+  deny-by-default hardening preset to an existing unit; `relax` drops
+  directives and `extend` appends to list-valued ones (`~` entries in
+  `SystemCallFilter` deny). The unit's own settings win.
+- `linux-builder` (Darwin): the Virtualization.framework builder, sized by
+  `nstdl.linuxBuilder.{cores,memorySize,diskSize}`. `sandboxSecrets` delivers
+  host secrets, such as a private registry token, into the VM's build sandbox;
+  any build on the builder can read them, so keep it to a single-user
+  workstation. Rotations arrive within a few minutes, and build scratch is
+  emptied at boot. On a fresh machine switch once with `bootstrap = true`,
+  then without.
+- `developer` (Home Manager) also provides
+  `nstdl.programs.pnpm.registryAuth`: `auth.ini` holds a `tokenHelper` that
+  reads the token file on each pnpm run, never the token. Set the agenix
+  secret's `owner` to the user.
 - `proxmox-backup`: typed, credential-backed Proxmox Backup Client jobs and
   one-off client wrappers.
 - `garage`: single-node Garage 2 object storage on loopback (S3 on
@@ -322,13 +344,14 @@ German regional formatting, and the German `nodeadkeys` keyboard layout across
 the console, display manager, and GNOME session. Override `hosts.<name>.locale`
 when a host needs different language, formatting, or keyboard conventions.
 
-nstdl is consumed through its flake-parts module. Direct NixOS, nix-darwin, and
-Home Manager module composition is intentionally not a supported API.
+nstdl is consumed through its flake-parts module. The exceptions are
+`nixosModules.paradedb` and `nixosModules.garage`, exported for NixOS
+configurations outside it, such as an application's VM test.
 
 ## Input sharing
 
 `nstdl` owns and locks its Home Manager, nix-darwin, nix-index-database, Disko,
-and deploy-rs inputs. Its defaults pair unstable nixpkgs with Home Manager
+deploy-rs, and fenix inputs. Its defaults pair unstable nixpkgs with Home Manager
 master. A consumer using those defaults only needs to share `nixpkgs` and
 `flake-parts`, as shown above.
 

@@ -8,25 +8,40 @@
 let
   cfg = config.nstdl.programs.pnpm.registryAuth;
 
-  # pnpm 11 keeps credentials in auth.ini, separate from config.yaml, so
-  # writing this does not conflict with a managed config.yaml or .npmrc.
-  authFile =
-    if pkgs.stdenv.isDarwin then "Library/Preferences/pnpm/auth.ini" else ".config/pnpm/auth.ini";
+  # pnpm reads auth.ini separately from config.yaml, so owning it does not
+  # conflict with a managed config.yaml or .npmrc. pnpm prefers
+  # $XDG_CONFIG_HOME/pnpm over its platform default.
+  useXdg = pkgs.stdenv.isLinux || config.xdg.enable;
 
-  line =
-    entry: "//${lib.removePrefix "https://" (lib.removePrefix "http://" entry.registry)}:_authToken=";
+  # The trailing slash is significant: pnpm never matches a key without it.
+  key =
+    registry:
+    "//${lib.removeSuffix "/" (lib.removePrefix "https://" (lib.removePrefix "http://" registry))}/";
+
+  # pnpm runs the helper when it needs the token, so the token is never copied
+  # out of the secret file and rotation applies on the next pnpm run.
+  tokenHelper =
+    name: entry:
+    pkgs.writeShellScript "nstdl-pnpm-token-${name}" ''
+      exec ${pkgs.coreutils}/bin/tr -d '[:space:]' < ${lib.escapeShellArg entry.tokenFile}
+    '';
+
+  text = lib.concatStrings (
+    lib.mapAttrsToList (
+      name: entry: "${key entry.registry}:tokenHelper=${tokenHelper name entry}\n"
+    ) cfg
+  );
 in
 {
   options.nstdl.programs.pnpm.registryAuth = lib.mkOption {
     default = { };
     description = ''
-      Private npm registry credentials for pnpm, written to `auth.ini` at
-      activation from files outside the Nix store.
+      Private npm registry credentials for pnpm.
 
-      Each entry names a file decrypted on this machine, typically by agenix;
-      the token itself is never evaluated into a derivation. `pnpm config set`
-      is avoided because it takes the token as a command-line argument, which
-      is visible in the process list.
+      Each entry names a file decrypted on this machine, typically by agenix.
+      `auth.ini` holds only a `tokenHelper` that reads the file whenever pnpm
+      needs the token, so the token is never evaluated into a derivation or
+      copied elsewhere.
 
       nstdl owns the whole file, so declare every authenticated registry
       here.
@@ -44,8 +59,10 @@ in
             type = lib.types.str;
             description = ''
               Absolute path to a file containing only the token, typically
-              `osConfig.age.secrets.<name>.path`. A string, not a Nix path: a
-              path literal would copy the secret into the world-readable store.
+              `osConfig.age.secrets.<name>.path`. It must be readable by this
+              user: set the agenix secret's `owner`, which defaults to root.
+              A string, not a Nix path: a path literal would copy the secret
+              into the world-readable store.
             '';
           };
         };
@@ -54,39 +71,15 @@ in
   };
 
   config = lib.mkIf (cfg != { }) {
-    home.activation.nstdlPnpmRegistryAuth = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      authPath="$HOME/${authFile}"
-      run mkdir -p "$(dirname "$authPath")"
-
-      # Created at 0600 rather than tightened afterwards, so the token is
-      # never briefly world-readable.
-      tmp="$(mktemp)"
-      chmod 0600 "$tmp"
-      ok=1
-      ${lib.concatStringsSep "\n" (
-        lib.mapAttrsToList (name: entry: ''
-          # agenix decrypts from its own launchd daemon on darwin, so the
-          # source can lag behind home-manager activation.
-          for _ in $(seq 1 30); do
-            [ -r "${entry.tokenFile}" ] && break
-            sleep 1
-          done
-
-          if [ -r "${entry.tokenFile}" ]; then
-            printf '%s%s\n' ${lib.escapeShellArg (line entry)} "$(tr -d '[:space:]' < ${lib.escapeShellArg entry.tokenFile})" >> "$tmp"
-          else
-            echo "nstdl: pnpm registry auth '${name}': ${entry.tokenFile} is not readable" >&2
-            ok=0
-          fi
-        '') cfg
-      )}
-
-      if [ "$ok" = 1 ]; then
-        run install -m 0600 "$tmp" "$authPath"
-      else
-        echo "nstdl: leaving $authPath untouched because a token file was missing" >&2
-      fi
-      rm -f "$tmp"
-    '';
+    xdg.configFile."pnpm/auth.ini" = lib.mkIf useXdg {
+      inherit text;
+      force = true;
+    };
+    # Always on Darwin: it replaces a token copy written there before
+    # tokenHelper, even once pnpm reads the XDG file instead.
+    home.file."Library/Preferences/pnpm/auth.ini" = lib.mkIf pkgs.stdenv.isDarwin {
+      inherit text;
+      force = true;
+    };
   };
 }
