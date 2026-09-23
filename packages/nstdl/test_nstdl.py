@@ -460,33 +460,72 @@ class DeployArgvTest(unittest.TestCase):
         self.assertIn("deployment.enable", str(failure.exception))
 
 
+class RebuiltTest(unittest.TestCase):
+    def test_only_names_in_both_closures_under_a_new_path(self):
+        old = ["/nix/store/a-etc", "/nix/store/b-hello-1.0", "/nix/store/c-same"]
+        new = ["/nix/store/d-etc", "/nix/store/e-hello-1.1", "/nix/store/c-same", "/nix/store/f-brand-new"]
+        self.assertEqual(nstdl.rebuilt(old, new), ["etc"])
+
+
 class DeployCommandTest(unittest.TestCase):
-    """The command line as typed, through argparse, into a stub deploy-rs that
-    records its argv — the layer where a `--` is or is not consumed."""
+    """The command line as typed, through argparse, into stubs of nix, nom,
+    ssh and deploy-rs that record their argv — the layer where a `--` is or is
+    not consumed, and where the preview runs before activation."""
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
         (self.root / "flake.nix").write_text("{ }\n")
         manifest = self.root / "manifest.json"
-        manifest.write_text(json.dumps({"recipients": [], "identities": [], "items": {}, "deploy": {"nodes": ["server"]}}))
+        node = {"hostname": "server.example", "sshUser": "admin"}
+        manifest.write_text(json.dumps({"recipients": [], "identities": [], "items": {}, "deploy": {"nodes": {"server": node}}}))
         self.log = self.root / "deploy.log"
-        stub = self.root / "deploy-stub"
-        stub.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > {self.log}\n')
-        stub.chmod(0o755)
-        self.environment = {**os.environ, "NSTDL_MANIFEST": str(manifest), "NSTDL_DEPLOY": str(stub)}
+        self.calls = self.root / "calls.log"
+        bin = self.root / "bin"
+        bin.mkdir()
+        stubs = {
+            "deploy-rs": f'printf "%s\\n" "$@" > {self.log}',
+            "nix": f"""echo "nix $*" >> {self.calls}
+case "$1" in
+  build) echo /nix/store/new-system ;;
+  path-info) echo /nix/store/system.drv ;;
+esac""",
+            "nom": f'echo nom >> {self.calls}; cat > /dev/null',
+            "ssh": f"""echo "ssh $*" >> {self.calls}
+case "$*" in
+  *diff-closures*) echo "hello: 1.0 → 1.1" ;;
+  *path-info*/run/current-system) echo /nix/store/aaa-etc /nix/store/bbb-hello-1.0 ;;
+  *path-info*) echo /nix/store/ccc-etc /nix/store/ddd-hello-1.1 ;;
+  *dry-activate) echo "would restart the following units: nginx.service" ;;
+  *"diff -ru"*) echo "-listen 80"; exit 1 ;;
+esac""",
+        }
+        for name, body in stubs.items():
+            stub = bin / name
+            stub.write_text(f"#!/bin/sh\n{body}\n")
+            stub.chmod(0o755)
+        self.environment = {
+            **os.environ,
+            "PATH": f"{bin}:{os.environ['PATH']}",
+            "NSTDL_MANIFEST": str(manifest),
+            "NSTDL_DEPLOY": str(bin / "deploy-rs"),
+        }
 
     def tearDown(self):
         self.directory.cleanup()
 
-    def deploy(self, *args):
-        run = subprocess.run(
-            [sys.executable, str(SCRIPT), "deploy", *args],
+    def invoke(self, *args, yes=True):
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), *(["--yes"] if yes else []), "deploy", *args],
             cwd=self.root,
             env=self.environment,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
         )
+
+    def deploy(self, *args):
+        run = self.invoke(*args)
         self.assertEqual(run.returncode, 0, run.stderr)
         return self.log.read_text().splitlines()
 
@@ -499,6 +538,75 @@ class DeployCommandTest(unittest.TestCase):
     def test_deploy_rs_own_separator_survives(self):
         # deploy-rs hands everything after its `--` to `nix build`.
         self.assertEqual(self.deploy("server", "--", "--", "--impure"), [".#server", "--", "--impure"])
+
+    def test_no_rollback_disables_both_rollbacks(self):
+        self.assertEqual(
+            self.deploy("--no-rollback", "server", "-s"),
+            [".#server", "--magic-rollback", "false", "--auto-rollback", "false", "-s"],
+        )
+
+    def test_no_rollback_after_the_host_is_refused(self):
+        run = self.invoke("server", "--no-rollback")
+        self.assertEqual(run.returncode, 1)
+        self.assertIn("before the host", run.stderr)
+        self.assertFalse(self.log.exists())
+
+    def test_the_diff_is_shown_before_activation(self):
+        run = self.invoke("server")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        calls = self.calls.read_text().splitlines()
+        # nom runs alongside the build, so its line lands anywhere before the copy.
+        self.assertIn("nom", calls[:2])
+        self.assertEqual(
+            [call for call in calls if call != "nom"],
+            [
+                "nix build --no-link --print-out-paths .#nixosConfigurations.server.config.system.build.toplevel --log-format internal-json -v",
+                "nix copy --substitute-on-destination --to ssh://admin@server.example /nix/store/new-system",
+                "ssh admin@server.example nix --extra-experimental-features nix-command store diff-closures /run/current-system /nix/store/new-system",
+                "ssh admin@server.example nix --extra-experimental-features nix-command path-info --recursive /run/current-system",
+                "ssh admin@server.example nix --extra-experimental-features nix-command path-info --recursive /nix/store/new-system",
+                "ssh admin@server.example sudo /nix/store/new-system/bin/switch-to-configuration dry-activate",
+            ],
+        )
+        self.assertIn("hello: 1.0 → 1.1", run.stderr)
+        self.assertIn("Rebuilt (1):\n  etc\n", run.stderr)
+        self.assertIn("would restart the following units: nginx.service", run.stderr)
+        self.assertNotIn("-listen 80", run.stderr)
+
+    def test_diff_files_diffs_etc(self):
+        run = self.invoke("--diff-files", "server")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("ssh admin@server.example diff -ru /run/current-system/etc /nix/store/new-system/etc", self.calls.read_text())
+        self.assertIn("-listen 80", run.stderr)
+
+    def test_a_failed_unit_preview_still_asks(self):
+        stub = self.root / "bin" / "ssh"
+        stub.write_text(stub.read_text().replace('*dry-activate) echo "would restart the following units: nginx.service" ;;', "*dry-activate) exit 1 ;;"))
+        self.assertEqual(self.deploy("server"), [".#server"])
+
+    def test_remote_build_builds_on_the_host(self):
+        self.deploy("server", "--remote-build")
+        self.assertEqual(
+            [call for call in self.calls.read_text().splitlines() if call != "nom"][:3],
+            [
+                "nix path-info --derivation .#nixosConfigurations.server.config.system.build.toplevel",
+                "nix copy --substitute-on-destination --derivation --to ssh-ng://admin@server.example /nix/store/system.drv",
+                "nix build --no-link --print-out-paths --store ssh-ng://admin@server.example /nix/store/system.drv^out --log-format internal-json -v",
+            ],
+        )
+
+    def test_a_failed_build_never_activates(self):
+        (self.root / "bin" / "nix").write_text("#!/bin/sh\nexit 1\n")
+        run = self.invoke("server")
+        self.assertEqual(run.returncode, 1)
+        self.assertIn("build failed", run.stderr)
+        self.assertFalse(self.log.exists())
+
+    def test_without_a_terminal_it_needs_yes(self):
+        run = self.invoke("server", yes=False)
+        self.assertEqual(run.returncode, 1)
+        self.assertIn("--yes", run.stderr)
+        self.assertFalse(self.calls.exists())
 
 
 if __name__ == "__main__":

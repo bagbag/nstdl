@@ -4,7 +4,7 @@ Everything about the flake comes from the manifest baked at evaluation time
 ($NSTDL_MANIFEST), so the command follows the consumer's lock and never
 evaluates a host itself; $NSTDL_AGENIX is the agenix-rekey command used to
 rekey and $NSTDL_DEPLOY the deploy-rs binary, present only for a flake that
-declares a deployable host.
+declares a deployable host. `nix`, `ssh` and `nom` come from PATH.
 
 Secret values live only in memory and on the stdin of child processes. They
 are never passed as arguments and never written unencrypted, except to the
@@ -71,8 +71,8 @@ class Manifest:
         data = json.loads(Path(path).read_text())
         self.recipients: list[str] = data["recipients"]
         self.identities: list[str] = data["identities"]
-        # Hosts that set `deployment.enable`.
-        self.deploy_nodes: list[str] = data["deploy"]["nodes"]
+        # Hosts that set `deployment.enable`, with their SSH destination.
+        self.deploy_nodes: dict[str, dict] = data["deploy"]["nodes"]
         self.items = {
             name: Item(
                 name=name,
@@ -440,7 +440,10 @@ class Secrets:
 # being deployed. So there is none.
 
 
-def deploy_argv(nodes: list[str], host: str, rest: list[str]) -> list[str]:
+NSTDL_DEPLOY_OPTIONS = ("--no-rollback", "--diff-files")
+
+
+def deploy_argv(nodes, host: str, rest: list[str], no_rollback: bool = False) -> list[str]:
     """deploy-rs' arguments. Everything after the host goes through untouched:
     deploy-rs' flag surface is large and moves, so a curated copy here would be
     a second thing to keep in sync. argparse.REMAINDER has already consumed the
@@ -449,13 +452,113 @@ def deploy_argv(nodes: list[str], host: str, rest: list[str]) -> list[str]:
         raise Failure("no host in this flake sets deployment.enable")
     if host not in nodes:
         raise Failure(f"unknown host '{host}'; this flake deploys: {', '.join(sorted(nodes))}")
-    return [f".#{host}", *rest]
+    # REMAINDER swallows anything after the host, so a misplaced nstdl option
+    # would reach deploy-rs as an unknown flag.
+    misplaced = [argument for argument in rest if argument in NSTDL_DEPLOY_OPTIONS]
+    if misplaced:
+        raise Failure(f"put {', '.join(misplaced)} before the host: nstdl deploy {misplaced[0]} {host}")
+    # Both: magic rollback reverts when the deployer cannot confirm the new
+    # generation over a fresh connection, auto rollback when activation fails.
+    rollback = ["--magic-rollback", "false", "--auto-rollback", "false"] if no_rollback else []
+    return [f".#{host}", *rollback, *rest]
 
 
-def deploy(manifest: Manifest, host: str, rest: list[str]) -> int:
-    arguments = deploy_argv(manifest.deploy_nodes, host, rest)
+def build_with_nom(argv: list[str]) -> str:
+    """Runs a `nix build --print-out-paths` with its log rendered by nom;
+    returns the single output path."""
+    build = subprocess.Popen(
+        [*argv, "--log-format", "internal-json", "-v"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    monitor = subprocess.run(["nom", "--json"], stdin=build.stderr, stdout=sys.stderr)
+    output = build.stdout.read()
+    build.wait()
+    if build.returncode != 0:
+        raise Failure(f"build failed (nix exited with status {build.returncode})")
+    if monitor.returncode != 0:
+        raise Failure(f"nom exited with status {monitor.returncode}")
+    return output.strip()
+
+
+def store_name(path: str) -> str:
+    """`/nix/store/<hash>-name` -> `name`."""
+    return path.rsplit("/", 1)[-1].split("-", 1)[-1]
+
+
+def rebuilt(old: list[str], new: list[str]) -> list[str]:
+    """Names present in both closures under a different path: what a change
+    rebuilt, including the configuration files a package diff cannot show."""
+    old_names = {store_name(path) for path in old}
+    added = set(new) - set(old)
+    return sorted({store_name(path) for path in added} & old_names)
+
+
+def preview(host: str, node: dict, remote_build: bool, diff_files: bool) -> None:
+    """Builds the host's system, puts it on the host and prints what changes
+    against the running one — before deploy-rs, which then finds the build
+    and the copy already done. Everything runs on the host: only there are
+    both closures present."""
+    target = f"{node['sshUser']}@{node['hostname']}"
+    installable = f".#nixosConfigurations.{host}.config.system.build.toplevel"
+    if remote_build:
+        # What deploy-rs' --remote-build does: the derivations travel, the
+        # build runs on the host.
+        derivation = run(["nix", "path-info", "--derivation", installable]).strip()
+        run(["nix", "copy", "--substitute-on-destination", "--derivation", "--to", f"ssh-ng://{target}", derivation])
+        system = build_with_nom(["nix", "build", "--no-link", "--print-out-paths", "--store", f"ssh-ng://{target}", f"{derivation}^out"])
+    else:
+        system = build_with_nom(["nix", "build", "--no-link", "--print-out-paths", installable])
+        print(f"Copying to {target}...", file=sys.stderr)
+        run(["nix", "copy", "--substitute-on-destination", "--to", f"ssh://{target}", system])
+    nix = ["nix", "--extra-experimental-features", "nix-command"]
+    current = "/run/current-system"
+
+    print(f"\n{host}: {current} -> {system}\n\nPackages:", file=sys.stderr)
+    packages = run(["ssh", target, *nix, "store", "diff-closures", current, system])
+    print(packages.rstrip() or "  (none)", file=sys.stderr)
+
+    old, new = (run(["ssh", target, *nix, "path-info", "--recursive", path]).split() for path in (current, system))
+    names = rebuilt(old, new)
+    print(f"\nRebuilt ({len(names)}):", file=sys.stderr)
+    shown = 40
+    for name in names[:shown]:
+        print(f"  {name}", file=sys.stderr)
+    if len(names) > shown:
+        print(f"  ... and {len(names) - shown} more", file=sys.stderr)
+
+    if diff_files:
+        # /etc holds every generated configuration file, units included;
+        # diff follows its links into the store. Status 1 means "differs".
+        print("\nFiles:", file=sys.stderr)
+        files = subprocess.run(["ssh", target, "diff", "-ru", f"{current}/etc", f"{system}/etc"], stdout=sys.stderr)
+        if files.returncode > 1:
+            raise Failure(f"diff of {host}'s /etc exited with status {files.returncode}")
+
+    # Root only (switch-to-configuration refuses otherwise), so sudo — which
+    # may ask for a password, hence the terminal. Informational: the question
+    # below still gates activation.
+    print("\nUnits:", file=sys.stderr)
+    sudo = [] if node["sshUser"] == "root" else ["sudo"]
+    terminal = ["-t"] if sys.stdin.isatty() else []
+    units = subprocess.run(["ssh", *terminal, target, *sudo, f"{system}/bin/switch-to-configuration", "dry-activate"], stdout=sys.stderr)
+    if units.returncode != 0:
+        print(f"  (unit preview failed with status {units.returncode})", file=sys.stderr)
+
+
+def deploy(manifest: Manifest, host: str, rest: list[str], no_rollback: bool, diff_files: bool, assume_yes: bool) -> int:
+    arguments = deploy_argv(manifest.deploy_nodes, host, rest, no_rollback)
     # Set whenever a node is declared: the module derives both from one list.
     binary = os.environ["NSTDL_DEPLOY"]
+    if not assume_yes and not sys.stdin.isatty():
+        raise Failure("refusing to deploy without a terminal; pass --yes to allow it")
+    preview(host, manifest.deploy_nodes[host], "--remote-build" in rest, diff_files)
+    if no_rollback:
+        print("Rollback disabled: a failed activation stays in place.", file=sys.stderr)
+    if not assume_yes and input(f"Activate on {host}? [y/N] ").strip().lower() not in ("y", "yes"):
+        print("Not deployed.", file=sys.stderr)
+        return EXIT_FAILURE
     print(f"Deploying {host}...", file=sys.stderr)
     # exec, not a child: deploy-rs owns the terminal from here — its progress
     # output, an interactive sudo prompt, the magic-rollback confirmation, and
@@ -494,7 +597,24 @@ def parser(manifest: Manifest) -> argparse.ArgumentParser:
 
     # A noun taking an argument rather than a verb: there is one thing to do to
     # a host, and `nstdl deploy app-01` is the whole point of the wrapper.
-    deploy = nouns.add_parser("deploy", help="build and activate a host with deploy-rs")
+    deploy = nouns.add_parser(
+        "deploy",
+        help="build a host, show what changes, and activate it with deploy-rs",
+        description="Builds the host's system, copies it to the host, shows what changes against the "
+        "running system — packages, rebuilt store paths, and the units the switch would touch — and asks "
+        "before deploy-rs activates it (--yes skips the question).",
+    )
+    deploy.add_argument(
+        "--diff-files",
+        action="store_true",
+        help="also print a unified diff of the host's /etc, generated units included",
+    )
+    deploy.add_argument(
+        "--no-rollback",
+        action="store_true",
+        help="keep the new generation even if activation fails or the host stops answering; "
+        "for a failure that a reboot clears",
+    )
     deploy.add_argument(
         "host",
         metavar="HOST",
@@ -518,7 +638,7 @@ def main(argv: list[str]) -> int:
         if not Path("flake.nix").is_file():
             raise Failure("run from the flake root (the ./nstdl wrapper does this)")
         if args.noun == "deploy":
-            return deploy(manifest, args.host, args.rest)
+            return deploy(manifest, args.host, args.rest, args.no_rollback, args.diff_files, args.yes)
         commands = Secrets(manifest, os.environ["NSTDL_AGENIX"], args.yes)
         match args.verb:
             case "status":

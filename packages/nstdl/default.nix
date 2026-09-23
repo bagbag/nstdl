@@ -7,6 +7,7 @@
   python3,
   git,
   mkpasswd,
+  nix-output-monitor,
   rage,
   xkcdpass,
   manifest,
@@ -19,6 +20,7 @@ let
   tools = [
     git
     mkpasswd
+    nix-output-monitor
     rage
     xkcdpass
   ];

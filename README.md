@@ -147,9 +147,21 @@ nstdl.hosts.app-01 = {
 Deploy through the same wrapper the secrets use:
 
 ```console
-./nstdl deploy app-01                     # build and activate
+./nstdl deploy app-01                     # build, show the diff, ask, activate
+./nstdl deploy --no-rollback app-01       # keep the generation even if activation fails
+./nstdl deploy --diff-files app-01        # also a unified diff of /etc
 ./nstdl deploy app-01 -- --dry-activate   # anything after the host is deploy-rs'
 ```
+
+Before activating, it builds the system with `nom` output (on the host under
+`--remote-build`), copies it and shows, against the host's running system: the
+package diff (`nix store diff-closures`), the store paths rebuilt under an
+existing name (configuration files and units included), and the units the
+switch would stop, start, restart or reload (`switch-to-configuration
+dry-activate` under `sudo`, which may ask for the password). Then it asks;
+`--yes` skips the question. `--no-rollback` disables both deploy-rs rollbacks: meant for a failure a
+reboot clears, it also keeps a generation that locks you out. nstdl options go
+before the host.
 
 It runs the deploy-rs this flake locks, matching the `activate-rs` in the
 profile. A host whose secrets are missing or not rekeyed fails at evaluation.
