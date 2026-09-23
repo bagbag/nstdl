@@ -16,6 +16,8 @@ from unittest import mock
 sys.dont_write_bytecode = True
 
 SCRIPT = Path(__file__).with_name("nstdl.py")
+sys.path.insert(0, str(SCRIPT.parent))
+import nstdl  # noqa: E402
 
 
 class SecretCommandTest(unittest.TestCase):
@@ -34,7 +36,11 @@ class SecretCommandTest(unittest.TestCase):
 
         self.agenix_log = self.root / "agenix.log"
         agenix = self.root / "agenix-stub"
-        agenix.write_text(f'#!/bin/sh\necho "$*" >> {self.agenix_log}\n')
+        # Like agenix-rekey, fails while a host-granted secret has no file.
+        agenix.write_text(
+            f'#!/bin/sh\nfor f in secrets/key.age secrets/admin-password-hash.age secrets/npm-token.age; '
+            f'do test -f "$f" || exit 1; done\necho "$*" >> {self.agenix_log}\n'
+        )
         agenix.chmod(0o755)
 
         def item(file, generator=None, rotate=False, hosts=()):
@@ -54,10 +60,14 @@ class SecretCommandTest(unittest.TestCase):
                     {**random, "type": "password-hash", "from": "admin-password"},
                     hosts=[host],
                 ),
-                "npm-token": item("secrets/npm-token.age"),
+                "npm-token": item("secrets/npm-token.age", hosts=[host]),
                 "api-token": item("secrets/api-token.age", rotate=True),
                 "chosen-password-hash": item(
                     "secrets/chosen-password-hash.age", {**random, "type": "password-hash"}
+                ),
+                "ext-password": item("secrets/ext-password.age", rotate=True),
+                "ext-password-hash": item(
+                    "secrets/ext-password-hash.age", {**random, "type": "password-hash", "from": "ext-password"}
                 ),
             },
             "deploy": {"nodes": ["server"]},
@@ -65,6 +75,18 @@ class SecretCommandTest(unittest.TestCase):
         self.manifest = self.root / "manifest.json"
         self.manifest.write_text(json.dumps(manifest))
         self.environment = {**os.environ, "NSTDL_MANIFEST": str(self.manifest), "NSTDL_AGENIX": str(agenix)}
+
+    def assert_hash_of(self, name, password):
+        stored = self.decrypt(name)
+        self.assertTrue(stored.startswith("$y$"))
+        recomputed = subprocess.run(
+            ["mkpasswd", f"--salt={stored.rsplit('$', 1)[0]}", "--stdin"],
+            input=password,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        self.assertEqual(recomputed, stored)
 
     def tearDown(self):
         self.directory.cleanup()
@@ -100,20 +122,17 @@ class SecretCommandTest(unittest.TestCase):
         passphrase = self.decrypt("admin-password")
         self.assertEqual(len(passphrase.split(" ")), 4)
 
-        stored = self.decrypt("admin-password-hash")
-        self.assertTrue(stored.startswith("$y$"))
-        recomputed = subprocess.run(
-            ["mkpasswd", f"--salt={stored.rsplit('$', 1)[0]}", "--stdin"],
-            input=passphrase,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        self.assertEqual(recomputed, stored)
+        self.assert_hash_of("admin-password-hash", passphrase)
 
         self.assertFalse((self.root / "secrets/npm-token.age").exists())
         self.assertFalse((self.root / "secrets/chosen-password-hash.age").exists())
-        self.assertIn("npm-token, api-token, chosen-password-hash", result.stderr)
+        self.assertIn("npm-token, api-token, chosen-password-hash, ext-password", result.stderr)
+        # Rekeying now would fail on the host-granted npm-token.
+        self.assertIn("Rekey deferred until these have a value: npm-token", result.stderr)
+        self.assertFalse(self.agenix_log.exists())
+
+        done = self.nstdl("--yes", "secret", "set", "npm-token", input="npm_abc\n")
+        self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.agenix_log.read_text(), "rekey -a\n")
 
         tracked = subprocess.run(
@@ -158,6 +177,58 @@ class SecretCommandTest(unittest.TestCase):
         self.assertEqual(rotated.returncode, 0, rotated.stderr)
         self.assertNotEqual(self.file_bytes("token"), token)
 
+    def test_hash_of_an_entered_source_waits_for_set(self):
+        status = self.nstdl("secret", "status")
+        self.assertRegex(status.stdout, r"ext-password-hash\s+missing: run set ext-password")
+
+        synced = self.nstdl("--yes", "secret", "sync")
+        self.assertEqual(synced.returncode, 0, synced.stderr)
+        self.assertIn("ext-password-hash (set ext-password)", synced.stderr)
+        self.assertFalse((self.root / "secrets/ext-password-hash.age").exists())
+
+        self.assertEqual(self.nstdl("--yes", "secret", "set", "ext-password", input="one\n").returncode, 0)
+        self.assert_hash_of("ext-password-hash", "one")
+
+    def test_rotate_derives_hashes_from_the_new_value_without_an_identity(self):
+        self.nstdl("--yes", "secret", "set", "ext-password", input="one\n")
+        hidden = self.root / "identity.hidden"
+        os.rename(self.identity, hidden)
+        try:
+            rotated = self.nstdl("--yes", "secret", "rotate", "ext-password", input="two\n")
+        finally:
+            os.rename(hidden, self.identity)
+        self.assertEqual(rotated.returncode, 0, rotated.stderr)
+        self.assertEqual(self.decrypt("ext-password"), "two")
+        self.assert_hash_of("ext-password-hash", "two")
+
+    def test_a_failed_hash_leaves_source_and_hash_unchanged(self):
+        self.nstdl("--yes", "secret", "set", "ext-password", input="one\n")
+        before = {name: self.file_bytes(name) for name in ("ext-password", "ext-password-hash")}
+        stubs = self.root / "failing"
+        stubs.mkdir()
+        (stubs / "mkpasswd").write_text("#!/bin/sh\nexit 1\n")
+        (stubs / "mkpasswd").chmod(0o755)
+        self.environment["PATH"] = f"{stubs}:{os.environ['PATH']}"
+        rotated = self.nstdl("--yes", "secret", "rotate", "ext-password", input="two\n")
+        self.assertEqual(rotated.returncode, 1)
+        for name, content in before.items():
+            self.assertEqual(self.file_bytes(name), content, name)
+
+    def test_set_replace_corrects_an_entered_value(self):
+        self.nstdl("--yes", "secret", "set", "npm-token", input="npm_typo\n")
+        fixed = self.nstdl("--yes", "secret", "set", "--replace", "npm-token", input="npm_abc\n")
+        self.assertEqual(fixed.returncode, 0, fixed.stderr)
+        self.assertEqual(self.decrypt("npm-token"), "npm_abc")
+
+        self.nstdl("--yes", "secret", "set", "ext-password", input="typo\n")
+        self.nstdl("--yes", "secret", "set", "--replace", "ext-password", input="right\n")
+        self.assert_hash_of("ext-password-hash", "right")
+
+        self.nstdl("--yes", "secret", "sync")
+        generated = self.nstdl("--yes", "secret", "set", "--replace", "key", input="x\n")
+        self.assertEqual(generated.returncode, 1)
+        self.assertIn("is generated", generated.stderr)
+
     def test_set_only_creates(self):
         created = self.nstdl("--yes", "secret", "set", "npm-token", input="npm_abc\n")
         self.assertEqual(created.returncode, 0, created.stderr)
@@ -167,11 +238,11 @@ class SecretCommandTest(unittest.TestCase):
         self.assertEqual(refused.returncode, 1)
         self.assertEqual(self.decrypt("npm-token"), "npm_abc")
 
-        # Even where replacing is allowed, set never replaces: that is rotate's job.
+        # Without --replace, set never replaces, even where rotate may.
         self.nstdl("--yes", "secret", "set", "api-token", input="first\n")
         again = self.nstdl("--yes", "secret", "set", "api-token", input="second\n")
         self.assertEqual(again.returncode, 1)
-        self.assertIn("use rotate", again.stderr)
+        self.assertIn("set --replace", again.stderr)
         self.assertEqual(self.decrypt("api-token"), "first")
 
         generated = self.nstdl("--yes", "secret", "set", "key", input="x\n")
@@ -191,9 +262,6 @@ class SecretCommandTest(unittest.TestCase):
 
     def edit(self, name, editor_script):
         """Runs `edit` in-process as if from a terminal, with a stub editor."""
-        sys.path.insert(0, str(SCRIPT.parent))
-        import nstdl
-
         editor = self.root / "bin" / "micro"
         editor.parent.mkdir(exist_ok=True)
         # The file comes last, after the hardening options.
@@ -215,8 +283,10 @@ class SecretCommandTest(unittest.TestCase):
         return (self.root / "editor-args").read_text()
 
     def test_edit_round_trips_the_value_exactly(self):
+        self.nstdl("--yes", "secret", "sync")
+        self.nstdl("--yes", "secret", "set", "npm-token", input="npm_abc\n")
         self.nstdl("--yes", "secret", "set", "api-token", input="first\n")
-        self.agenix_log.unlink()
+        self.agenix_log.unlink(missing_ok=True)
         args = self.edit("api-token", 'test "$(cat "$file")" = first || exit 1; printf second > "$file"')
         self.assertEqual(self.decrypt("api-token"), "second")
         self.assertIn("-backup false -eofnewline false", args)
@@ -230,14 +300,14 @@ class SecretCommandTest(unittest.TestCase):
     def test_edit_without_changes_writes_nothing(self):
         self.nstdl("--yes", "secret", "set", "api-token", input="first\n")
         before = self.file_bytes("api-token")
-        self.agenix_log.unlink()
+        self.agenix_log.unlink(missing_ok=True)
         self.edit("api-token", "true")
         self.assertEqual(self.file_bytes("api-token"), before)
         self.assertFalse(self.agenix_log.exists())
 
     def test_edit_refuses_values_that_must_not_change(self):
         self.nstdl("--yes", "secret", "set", "npm-token", input="npm_abc\n")
-        with self.assertRaisesRegex(Exception, "does not allow replacing"):
+        with self.assertRaisesRegex(nstdl.Failure, "does not allow replacing"):
             self.edit("npm-token", "true")
         piped = self.nstdl("--yes", "secret", "edit", "api-token")
         self.assertEqual(piped.returncode, 1)
@@ -269,9 +339,6 @@ class RotateConfirmationTest(unittest.TestCase):
     """The typed-name confirmation, which only an interactive session sees."""
 
     def setUp(self):
-        sys.path.insert(0, str(SCRIPT.parent))
-        import nstdl
-
         self.nstdl = nstdl
         self.directory = tempfile.TemporaryDirectory()
         self.file = Path(self.directory.name) / "token.age"
@@ -285,20 +352,45 @@ class RotateConfirmationTest(unittest.TestCase):
         self.directory.cleanup()
 
     def test_a_wrong_name_cancels_before_anything_is_asked_or_written(self):
-        with mock.patch("sys.stdin.isatty", return_value=True), \
-                mock.patch("builtins.input", return_value="tokn"), \
-                mock.patch("getpass.getpass") as getpass:
-            with self.assertRaisesRegex(self.nstdl.Failure, "not confirmed"):
-                self.secrets.rotate(self.item)
-        getpass.assert_not_called()
-        self.assertEqual(self.file.read_bytes(), b"existing")
+        for command in (self.secrets.rotate, lambda item: self.secrets.set(item, replace=True)):
+            with mock.patch("sys.stdin.isatty", return_value=True), \
+                    mock.patch("builtins.input", return_value="tokn"), \
+                    mock.patch("getpass.getpass") as getpass:
+                with self.assertRaisesRegex(self.nstdl.Failure, "not confirmed"):
+                    command(self.item)
+            getpass.assert_not_called()
+            self.assertEqual(self.file.read_bytes(), b"existing")
+
+
+class EditorHardeningTest(unittest.TestCase):
+    def test_vi_resolving_to_vim_is_hardened(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            vim = root / "vim"
+            vim.write_text(f'#!/bin/sh\necho "$@" > {root}/args\n')
+            vim.chmod(0o755)
+            (root / "vi").symlink_to(vim)
+            with mock.patch.dict(os.environ, {"EDITOR": str(root / "vi"), "VISUAL": ""}), \
+                    mock.patch.object(nstdl, "plaintext_directory", return_value=directory):
+                nstdl.edit_in_editor("x", "value")
+            self.assertTrue((root / "args").read_text().startswith("-n -i NONE --cmd "))
+
+    def test_vim_resolving_to_a_variant_stays_hardened(self):
+        # Debian: vim -> /etc/alternatives/vim -> vim.basic.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            variant = root / "vim.basic"
+            variant.write_text(f'#!/bin/sh\necho "$@" > {root}/args\n')
+            variant.chmod(0o755)
+            (root / "vim").symlink_to(variant)
+            with mock.patch.dict(os.environ, {"EDITOR": str(root / "vim"), "VISUAL": ""}), \
+                    mock.patch.object(nstdl, "plaintext_directory", return_value=directory):
+                nstdl.edit_in_editor("x", "value")
+            self.assertTrue((root / "args").read_text().startswith("-n -i NONE --cmd "))
 
 
 class RandomValueTest(unittest.TestCase):
     def setUp(self):
-        sys.path.insert(0, str(SCRIPT.parent))
-        import nstdl
-
         self.nstdl = nstdl
 
     def test_bytes_encodings_decode_to_exactly_those_bytes(self):
@@ -315,9 +407,6 @@ class StoreTest(unittest.TestCase):
     """Publishing semantics, exercised directly."""
 
     def setUp(self):
-        sys.path.insert(0, str(SCRIPT.parent))
-        import nstdl
-
         self.nstdl = nstdl
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
@@ -348,52 +437,68 @@ class StoreTest(unittest.TestCase):
 
 
 class DeployArgvTest(unittest.TestCase):
-    """Coverage stops at the argv handed to deploy-rs. The sandbox this suite
-    runs in has no host, no network and no store to activate, so nothing below
-    exercises a deployment — only the string assembly and the two refusals."""
+    """Host validation. Nothing here exercises a deployment: the sandbox this
+    suite runs in has no host, no network and no store to activate."""
 
     def setUp(self):
-        sys.path.insert(0, str(SCRIPT.parent))
-        import nstdl
-
         self.nstdl = nstdl
 
     def test_host_becomes_a_flake_reference(self):
         self.assertEqual(
-            self.nstdl.deploy_argv("/nix/store/x/bin/deploy", ["server"], "server", []),
-            ["/nix/store/x/bin/deploy", ".#server"],
-        )
-
-    def test_extra_arguments_pass_through_in_order(self):
-        self.assertEqual(
-            self.nstdl.deploy_argv("deploy", ["server"], "server", ["--dry-activate", "-s"]),
-            ["deploy", ".#server", "--dry-activate", "-s"],
-        )
-
-    def test_a_separating_dash_dash_is_dropped_once(self):
-        # argparse.REMAINDER already strips one on current Python; a second
-        # would be deploy-rs' own argument and must survive.
-        self.assertEqual(
-            self.nstdl.deploy_argv("deploy", ["server"], "server", ["--", "--", "-s"]),
-            ["deploy", ".#server", "--", "-s"],
+            self.nstdl.deploy_argv(["server"], "server", []),
+            [".#server"],
         )
 
     def test_unknown_host_names_the_deployable_ones(self):
         with self.assertRaises(self.nstdl.Failure) as failure:
-            self.nstdl.deploy_argv("deploy", ["beta", "alpha"], "gamma", [])
+            self.nstdl.deploy_argv(["beta", "alpha"], "gamma", [])
         self.assertIn("alpha, beta", str(failure.exception))
-
-    def test_a_declared_host_without_a_binary_is_a_build_fault(self):
-        # Only reachable if the node list and the wrapper's deploy-rs were
-        # derived apart; the module derives both from one condition.
-        with self.assertRaises(self.nstdl.Failure) as failure:
-            self.nstdl.deploy_argv(None, ["server"], "server", [])
-        self.assertIn("carries no deploy-rs", str(failure.exception))
 
     def test_a_flake_without_deployable_hosts_says_so(self):
         with self.assertRaises(self.nstdl.Failure) as failure:
-            self.nstdl.deploy_argv("deploy", [], "server", [])
+            self.nstdl.deploy_argv([], "server", [])
         self.assertIn("deployment.enable", str(failure.exception))
+
+
+class DeployCommandTest(unittest.TestCase):
+    """The command line as typed, through argparse, into a stub deploy-rs that
+    records its argv — the layer where a `--` is or is not consumed."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        (self.root / "flake.nix").write_text("{ }\n")
+        manifest = self.root / "manifest.json"
+        manifest.write_text(json.dumps({"recipients": [], "identities": [], "items": {}, "deploy": {"nodes": ["server"]}}))
+        self.log = self.root / "deploy.log"
+        stub = self.root / "deploy-stub"
+        stub.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > {self.log}\n')
+        stub.chmod(0o755)
+        self.environment = {**os.environ, "NSTDL_MANIFEST": str(manifest), "NSTDL_DEPLOY": str(stub)}
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def deploy(self, *args):
+        run = subprocess.run(
+            [sys.executable, str(SCRIPT), "deploy", *args],
+            cwd=self.root,
+            env=self.environment,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(run.returncode, 0, run.stderr)
+        return self.log.read_text().splitlines()
+
+    def test_arguments_after_the_host_pass_through(self):
+        self.assertEqual(self.deploy("server", "--dry-activate", "-s"), [".#server", "--dry-activate", "-s"])
+
+    def test_the_separator_is_optional(self):
+        self.assertEqual(self.deploy("server", "--", "--dry-activate"), [".#server", "--dry-activate"])
+
+    def test_deploy_rs_own_separator_survives(self):
+        # deploy-rs hands everything after its `--` to `nix build`.
+        self.assertEqual(self.deploy("server", "--", "--", "--impure"), [".#server", "--", "--impure"])
 
 
 if __name__ == "__main__":

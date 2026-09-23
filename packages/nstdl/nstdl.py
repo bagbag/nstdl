@@ -8,9 +8,10 @@ declares a deployable host.
 
 Secret values live only in memory and on the stdin of child processes. They
 are never passed as arguments and never written unencrypted, except to the
-private file `edit` hands to the editor. `set` only creates; an existing
-canonical file is only replaced by `rotate` or `edit`, and only when its item
-declares `rotate = true`.
+private file `edit` hands to the editor. An existing value is replaced only
+by `rotate` or `edit` of an item declaring `rotate = true`, by `set --replace`
+of an entered value after confirmation, or by re-deriving a hash whenever its
+source changes.
 """
 
 import argparse
@@ -70,9 +71,7 @@ class Manifest:
         data = json.loads(Path(path).read_text())
         self.recipients: list[str] = data["recipients"]
         self.identities: list[str] = data["identities"]
-        # Hosts that set `deployment.enable`. Empty for a consumer that only
-        # keeps secrets, which is also why such a flake's wrapper carries no
-        # deploy-rs at all.
+        # Hosts that set `deployment.enable`.
         self.deploy_nodes: list[str] = data["deploy"]["nodes"]
         self.items = {
             name: Item(
@@ -115,11 +114,13 @@ def random_value(format: str, byte_count: int | None, length: int | None) -> str
 
 
 # Options that keep an editor from writing the value anywhere else (backups,
-# swap, undo history) and from appending a final newline on save; other
-# editors are used as they are.
+# swap, undo history, viminfo/shada) and from appending a final newline on
+# save; other editors are used as they are. `-n` rather than `noswapfile`: the
+# autocmd would run only after the swap file already exists.
+VIM_HARDENING = ["-n", "-i", "NONE", "--cmd", "au BufRead * setlocal nobackup nomodeline noshelltemp noundofile nowritebackup nofixendofline"]
 EDITOR_HARDENING = {
-    "vim": ["--cmd", 'au BufRead * setlocal nobackup nomodeline noshelltemp noswapfile noundofile nowritebackup nofixendofline viminfo=""'],
-    "nvim": ["--cmd", "au BufRead * setlocal nobackup nomodeline noshelltemp noswapfile noundofile nowritebackup nofixendofline shadafile=NONE"],
+    "vim": VIM_HARDENING,
+    "nvim": VIM_HARDENING,
     "micro": ["-backup", "false", "-eofnewline", "false"],
 }
 
@@ -137,7 +138,11 @@ def edit_in_editor(name: str, value: str) -> str:
     """The only place a value is ever written unencrypted: a private file for
     the editor, removed however the editor or this process ends (except kill -9)."""
     editor = shlex.split(os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi")
-    editor += EDITOR_HARDENING.get(os.path.basename(editor[0]), [])
+    # By the typed name, else the resolved binary: `vi` linked to vim is
+    # hardened, a real nvi (which rejects these options) is left alone, and
+    # `vim` stays hardened where it resolves to a variant such as vim.basic.
+    binary = os.path.basename(os.path.realpath(shutil.which(editor[0]) or editor[0]))
+    editor += EDITOR_HARDENING.get(os.path.basename(editor[0])) or EDITOR_HARDENING.get(binary, [])
     directory = tempfile.mkdtemp(prefix="nstdl-", dir=plaintext_directory())
     try:
         path = Path(directory) / name
@@ -193,6 +198,8 @@ class Secrets:
             recipients = [arg for recipient in self.manifest.recipients for arg in ("-r", recipient)]
             with os.fdopen(descriptor, "wb") as output:
                 run(["rage", "-e", *recipients], input=value, stdout=output)
+                output.flush()
+                os.fsync(output.fileno())
             if replace:
                 os.replace(temporary, item.file)
             else:
@@ -219,6 +226,11 @@ class Secrets:
             run(["git", "-C", str(path.parent), "add", "--", path.name])
 
     def rekey(self) -> None:
+        # agenix-rekey asserts that every host-granted secret has a file.
+        missing = [item.name for item in self.manifest.items.values() if item.hosts and not item.file.exists()]
+        if missing:
+            print(f"Rekey deferred until these have a value: {', '.join(missing)}", file=sys.stderr)
+            return
         print("Rekeying for the hosts...", file=sys.stderr)
         run([self.agenix, "rekey", "-a"], stdout=None)
 
@@ -231,35 +243,18 @@ class Secrets:
             raise Failure("passwords are empty or do not match")
         return password
 
-    def generate(self, item: Item) -> str:
+    def generate(self, item: Item, source_value: str | None = None) -> str:
         generator = item.generator
         match generator["type"]:
             case "random":
                 return random_value(generator["format"], generator["bytes"], generator["length"])
             case "passphrase":
-                # Every parameter is passed explicitly. Left implicit, xkcdpass'
-                # own defaults decide the strength, and they are not the ones to
-                # want: `--min 5 --max 9` is strictly worse on both axes at once.
-                # `--max 9` does nothing (eff-long's longest word is 9
-                # characters), while `--min 5` drops 549 of the 7776 words —
-                # lowering entropy to 76.9 bits AND raising the average length
-                # typed. Dropping the length filter gives 77.5 bits in one
-                # character less.
-                #
-                # `--valid-chars` is composed into `^[a-z]{1,99}$` together with
-                # the length bounds, so it anchors the whole word rather than
-                # its first character. On eff-long it removes exactly four
-                # hyphenated entries (drop-down, felt-tip, t-shirt, yo-yo),
-                # leaving 7772 words and 6 x log2(7772) = 77.5 bits — a cost of
-                # 0.01 bits to lose the words whose spelling is ambiguous to
-                # read back over a console. It also keeps the value ASCII if the
-                # wordlist above is ever changed: ger-anlx, for instance, is
-                # 63% capitalised or umlauted entries. Lowercase and
-                # space-separated so it types identically on whatever keyboard
-                # layout a recovery console offers.
-                #
-                # `--allow-weak-rng` is deliberately never passed: xkcdpass then
-                # fails rather than silently falling back to a weak RNG.
+                # Every parameter is explicit so strength is decided here, not by
+                # xkcdpass' defaults (`--min 5` drops 549 words). The full
+                # eff-long list minus its four hyphenated words, lowercase ASCII,
+                # space-separated so it types the same on any console layout.
+                # Never `--allow-weak-rng`: xkcdpass then fails rather than fall
+                # back to a weak RNG.
                 words = run([
                     "xkcdpass",
                     "--wordfile", "eff-long",
@@ -274,6 +269,8 @@ class Secrets:
             case "password-hash":
                 if item.source is None:
                     password = self.prompt_password(item.name)
+                elif source_value is not None:
+                    password = source_value
                 else:
                     password = self.decrypt(self.manifest.items[item.source])
                 if not password:
@@ -281,11 +278,19 @@ class Secrets:
                 return run(["mkpasswd", "--method=yescrypt", "--stdin"], input=password).strip()
         raise Failure(f"unknown generator type {generator['type']!r}")
 
-    def refresh_dependents(self, item: Item) -> None:
-        """Re-derives the hashes computed from ITEM after ITEM changed; this is
-        the only way a derived value is ever replaced."""
-        for dependent in self.manifest.dependents(item.name):
-            self.store(dependent, self.generate(dependent), replace=dependent.file.exists())
+    def publish(self, item: Item, value: str, *, replace: bool) -> None:
+        """Stores VALUE with the hashes derived from it, then rekeys. The hashes
+        are computed first, so a failure there leaves every file as it was."""
+        derived = [(dependent, self.generate(dependent, value)) for dependent in self.manifest.dependents(item.name)]
+        self.store(item, value, replace=replace)
+        for dependent, digest in derived:
+            self.store(dependent, digest, replace=dependent.file.exists())
+        self.rekey()
+
+    def confirm_replace(self, item: Item) -> None:
+        if not self.assume_yes:
+            if input(f"Replace '{item.name}' for good? Type its name to confirm: ") != item.name:
+                raise Failure("not confirmed")
 
     # -- commands ------------------------------------------------------------
 
@@ -302,8 +307,12 @@ class Secrets:
         rows = [("SECRET", "STATE", "HOSTS")]
         for item in self.manifest.ordered():
             hosts = []
+            source = self.manifest.items.get(item.source)
             if not item.file.exists():
-                state = "missing: run set" if item.entered else "missing: run sync"
+                if source and source.entered and not source.file.exists():
+                    state = f"missing: run set {source.name}"
+                else:
+                    state = "missing: run set" if item.entered else "missing: run sync"
             else:
                 state = "ok"
                 for host in item.hosts:
@@ -314,9 +323,10 @@ class Secrets:
                         hosts.append(host["name"])
             drift = drift or state != "ok"
             rows.append((item.name, state, ", ".join(hosts) or "-"))
-        width = max(len(row[0]) for row in rows) + 2
+        name_width = max(len(row[0]) for row in rows) + 2
+        state_width = max(len(row[1]) for row in rows) + 2
         for name, state, hosts in rows:
-            print(f"{name:<{width}}{state:<24}{hosts}")
+            print(f"{name:<{name_width}}{state:<{state_width}}{hosts}")
         return EXIT_DRIFT if check and drift else 0
 
     def sync(self) -> int:
@@ -330,19 +340,24 @@ class Secrets:
                     f"'{item.name}' exists but its source '{source.name}' does not; "
                     f"delete {item.file} explicitly, then run sync again"
                 )
-        created, pending = 0, []
+        created, pending, values = 0, [], {}
         for item in self.manifest.ordered():
             if item.file.exists():
                 continue
             if item.entered:
                 pending.append(item.name)
                 continue
-            self.store(item, self.generate(item), replace=False)
+            source = self.manifest.items.get(item.source)
+            if source and source.name not in values and not source.file.exists():
+                pending.append(f"{item.name} (set {source.name})")
+                continue
+            values[item.name] = self.generate(item, values.get(item.source))
+            self.store(item, values[item.name], replace=False)
             created += 1
         print(f"Created {created} secret(s).", file=sys.stderr)
-        self.rekey()
         if pending:
             print(f"Still without a value (use `nstdl secret set`): {', '.join(pending)}", file=sys.stderr)
+        self.rekey()
         return 0
 
     def entered_value(self, item: Item) -> str:
@@ -352,15 +367,16 @@ class Secrets:
             return getpass.getpass(f"Value for {item.name}: ")
         return sys.stdin.read().removesuffix("\n")
 
-    def set(self, item: Item) -> int:
+    def set(self, item: Item, replace: bool = False) -> int:
         self.require_changes_allowed()
         if not item.entered:
             raise Failure(f"'{item.name}' is generated; use sync or rotate")
-        if item.file.exists():
-            raise Failure(f"'{item.name}' already has a value; use rotate to replace it")
-        self.store(item, self.entered_value(item), replace=False)
-        self.refresh_dependents(item)
-        self.rekey()
+        exists = item.file.exists()
+        if exists and not replace:
+            raise Failure(f"'{item.name}' already has a value; use set --replace to correct it")
+        if exists:
+            self.confirm_replace(item)
+        self.publish(item, self.entered_value(item), replace=exists)
         return 0
 
     def edit(self, item: Item) -> int:
@@ -378,9 +394,7 @@ class Secrets:
         if new == old:
             print(f"'{item.name}' unchanged.", file=sys.stderr)
             return 0
-        self.store(item, new, replace=True)
-        self.refresh_dependents(item)
-        self.rekey()
+        self.publish(item, new, replace=True)
         return 0
 
     def rotate(self, item: Item) -> int:
@@ -391,13 +405,8 @@ class Secrets:
             raise Failure(f"'{item.name}' does not allow rotation (rotate = false)")
         if not item.file.exists():
             raise Failure(f"'{item.name}' has no value yet; use {'set' if item.entered else 'sync'}")
-        if not self.assume_yes:
-            if input(f"Replace '{item.name}' for good? Type its name to confirm: ") != item.name:
-                raise Failure("not confirmed")
-        value = self.entered_value(item) if item.entered else self.generate(item)
-        self.store(item, value, replace=True)
-        self.refresh_dependents(item)
-        self.rekey()
+        self.confirm_replace(item)
+        self.publish(item, self.entered_value(item) if item.entered else self.generate(item), replace=True)
         return 0
 
     def view(self, item: Item) -> int:
@@ -431,35 +440,27 @@ class Secrets:
 # being deployed. So there is none.
 
 
-def deploy_argv(deploy: str | None, nodes: list[str], host: str, rest: list[str]) -> list[str]:
-    """Everything after the host goes through untouched. deploy-rs' flag
-    surface is large and moves, so a curated copy here would be a second thing
-    to keep in sync, and wrong between updates.
-
-    Declaration before installation: an empty node list is the ordinary state
-    of a secrets-only flake and says so, where a missing binary would blame
-    the build for a flake that simply has nothing to deploy."""
+def deploy_argv(nodes: list[str], host: str, rest: list[str]) -> list[str]:
+    """deploy-rs' arguments. Everything after the host goes through untouched:
+    deploy-rs' flag surface is large and moves, so a curated copy here would be
+    a second thing to keep in sync. argparse.REMAINDER has already consumed the
+    optional separating `--`; any further one is deploy-rs' own."""
     if not nodes:
         raise Failure("no host in this flake sets deployment.enable")
     if host not in nodes:
         raise Failure(f"unknown host '{host}'; this flake deploys: {', '.join(sorted(nodes))}")
-    if not deploy:
-        raise Failure("this flake declares a deployable host but its nstdl carries no deploy-rs")
-    # argparse.REMAINDER drops a leading `--` on current Python, but the
-    # behaviour has moved before; dropping it here makes the separator optional
-    # either way.
-    if rest and rest[0] == "--":
-        rest = rest[1:]
-    return [deploy, f".#{host}", *rest]
+    return [f".#{host}", *rest]
 
 
 def deploy(manifest: Manifest, host: str, rest: list[str]) -> int:
-    argv = deploy_argv(os.environ.get("NSTDL_DEPLOY"), manifest.deploy_nodes, host, rest)
+    arguments = deploy_argv(manifest.deploy_nodes, host, rest)
+    # Set whenever a node is declared: the module derives both from one list.
+    binary = os.environ["NSTDL_DEPLOY"]
     print(f"Deploying {host}...", file=sys.stderr)
     # exec, not a child: deploy-rs owns the terminal from here — its progress
     # output, an interactive sudo prompt, the magic-rollback confirmation, and
     # Ctrl-C reaching the activation rather than this wrapper.
-    os.execv(argv[0], argv)
+    os.execv(binary, [binary, *arguments])
 
 
 def parser(manifest: Manifest) -> argparse.ArgumentParser:
@@ -479,25 +480,28 @@ def parser(manifest: Manifest) -> argparse.ArgumentParser:
     status.add_argument("--check", action="store_true", help="exit 3 when anything is missing or not rekeyed")
     verbs.add_parser("sync", help="create every missing generated secret, then rekey; run after any declaration change")
     for verb, text in (
-        ("set", "enter the first value of an externally issued secret or a self-chosen password"),
+        ("set", "enter the value of an externally issued secret or a self-chosen password"),
         ("edit", "change an externally issued value in $EDITOR (needs rotate = true)"),
         ("rotate", "replace a value: generate a new one or enter it (needs rotate = true)"),
         ("view", "print the decrypted value"),
         ("verify", "check a typed password against a stored password hash"),
     ):
-        verbs.add_parser(verb, help=text).add_argument("item", choices=sorted(manifest.items), metavar="ITEM")
+        command = verbs.add_parser(verb, help=text)
+        command.add_argument("item", choices=sorted(manifest.items), metavar="ITEM")
+        if verb == "set":
+            command.add_argument("--replace", action="store_true", help="correct an existing entered value, after typing its name to confirm")
     verbs.add_parser("rekey", help="rekey every secret for its hosts")
 
     # A noun taking an argument rather than a verb: there is one thing to do to
-    # a host, and `nstdl deploy cloud-nix01` is the whole point of the wrapper.
+    # a host, and `nstdl deploy app-01` is the whole point of the wrapper.
     deploy = nouns.add_parser("deploy", help="build and activate a host with deploy-rs")
     deploy.add_argument(
         "host",
         metavar="HOST",
         help=", ".join(sorted(manifest.deploy_nodes)) or "no host in this flake is deployable",
     )
-    # Not `choices`: that would also foreclose the flake refs deploy-rs accepts
-    # in this position later. `deploy_argv` validates and names the valid set.
+    # Not `choices`: for a flake with no deployable host argparse could only
+    # say "invalid choice"; `deploy_argv` says why.
     deploy.add_argument(
         "rest",
         nargs=argparse.REMAINDER,
@@ -525,6 +529,8 @@ def main(argv: list[str]) -> int:
                 commands.require_changes_allowed()
                 commands.rekey()
                 return 0
+            case "set":
+                return commands.set(manifest.items[args.item], args.replace)
             case verb:
                 return getattr(commands, verb)(manifest.items[args.item])
     except Failure as failure:

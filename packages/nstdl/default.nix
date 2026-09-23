@@ -13,7 +13,7 @@
   agenix,
   # Null for a consumer that declares no deployable host, so a secrets-only
   # flake never pulls deploy-rs into its wrapper for a verb it cannot run.
-  deployRs ? null,
+  deployRs,
 }:
 let
   tools = [
