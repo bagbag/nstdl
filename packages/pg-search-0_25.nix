@@ -15,6 +15,7 @@
   openblas,
   pkg-config,
   postgresql,
+  stdenv,
 }:
 
 buildPgrxExtension (finalAttrs: {
@@ -83,24 +84,32 @@ buildPgrxExtension (finalAttrs: {
   buildInputs = [ openblas ];
 
   # ...and `buildInputs` alone only gets it past the link. Since 1.90 rustc
-  # links x86_64-linux with its own bundled rust-lld, which never reaches
-  # nixpkgs' ld wrapper, so no RUNPATH is written at all — not a missing entry,
-  # an empty one (rust-lang/rust#162781, unfixed in nixpkgs e554fab7 with rustc
-  # 1.98.1). `libopenblas.so.0` is then unresolvable at load time, and because
-  # the module preloads pg_search postgres does not degrade: it refuses to
-  # start. Opting out of the bundled linker puts the link back through the
-  # wrapper, which derives the RPATH from `buildInputs` itself.
+  # links x86_64-linux with its bundled rust-lld, which bypasses the ld
+  # wrapper, so no RUNPATH is written at all (rust-lang/rust#162781). The
+  # rustc here is fenix's upstream build (modules/nixos/features/paradedb.nix).
+  # `libopenblas.so.0` is then unresolvable at load time, and since the module
+  # preloads pg_search, postgres refuses to start. Opting out of the bundled
+  # linker routes the link through the wrapper, which derives the RPATH from
+  # `buildInputs` — every linked library, not only openblas.
   #
-  # Preferred over naming openblas' path here: it cannot drift from the
-  # dependency set, and it covers every library this extension links rather
-  # than only the one that happened to break. openblas is not optional —
-  # pg_search/Cargo.toml pulls `superkmeans` with `features = ["openblas"]`
-  # for `cfg(not(target_os = "macos"))`.
+  # openblas is not optional: pg_search/Cargo.toml pulls `superkmeans` with
+  # `features = ["openblas"]` for `cfg(not(target_os = "macos"))`.
   #
-  # Retire when nixpkgs teaches the cc wrapper to pass `-rpath` to rust-lld,
-  # or rustc stops bypassing it. `buildPgrxExtension` sets RUSTFLAGS on Darwin
-  # only, and appends there, so claiming it here is safe.
-  env.RUSTFLAGS = "-C linker-features=-lld -C link-self-contained=-linker";
+  # Retire once rustc's self-contained linker writes the RUNPATH itself;
+  # `postFixup` fails the build whenever it goes missing, whatever the cause.
+  # x86_64 only: no other target links through rust-lld by default, and stable
+  # rustc rejects `link-self-contained=-linker` elsewhere as unstable.
+  # `buildPgrxExtension` sets RUSTFLAGS on Darwin only, so claiming it is safe.
+  env = lib.optionalAttrs (stdenv.hostPlatform.rust.rustcTargetSpec == "x86_64-unknown-linux-gnu") {
+    RUSTFLAGS = "-C linker-features=-lld -C link-self-contained=-linker";
+  };
+
+  postFixup = lib.optionalString stdenv.hostPlatform.isElf ''
+    if ! patchelf --print-rpath "$out/lib/pg_search.so" | tr ':' '\n' | grep -qxF '${lib.getLib openblas}/lib'; then
+      echo "pg_search.so has no RUNPATH entry for openblas; postgres could not preload it" >&2
+      exit 1
+    fi
+  '';
 
   # pgrx tests try to install the extension into the postgresql store path.
   doCheck = false;

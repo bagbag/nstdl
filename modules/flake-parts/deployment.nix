@@ -20,8 +20,13 @@ let
     };
     fastConnection = mkOption {
       type = types.bool;
-      default = true;
-      description = "Whether deploy-rs should reuse a single SSH connection.";
+      default = false;
+      description = ''
+        Push the whole closure instead of letting the host substitute stock
+        paths from a binary cache (deploy-rs drops `--substitute-on-destination`).
+        Worth it only when the deployer is nearer the host than any cache is.
+        No effect under `--remote-build`, which skips that copy.
+      '';
     };
   };
 

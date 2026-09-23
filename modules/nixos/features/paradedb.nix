@@ -56,8 +56,7 @@ in
 
   config = lib.mkIf cfg.enable {
     services.postgresql = {
-      # From 0.25.0 pg_search's control metadata requires pgvector, and
-      # `vector` must exist before `pg_search` is created.
+      # From 0.25.0 pg_search's control metadata requires pgvector.
       extensions = ps: [
         ps.pgvector
         pg_search

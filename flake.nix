@@ -44,8 +44,7 @@
     # Rust toolchain for the pgrx-based PostgreSQL extensions. pgrx 0.19
     # declares rust-version 1.96, which nixpkgs release branches lag behind, and
     # a consumer's `nixpkgs.follows` drags this flake's nixpkgs down to theirs —
-    # so the toolchain cannot come from nixpkgs. Expressed as a version rather
-    # than as a nixpkgs revision that happens to carry one.
+    # so the toolchain cannot come from nixpkgs. Detail in paradedb.nix.
     fenix = {
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -64,25 +63,31 @@
 
   outputs =
     inputs@{ ... }:
+    let
+      lib = inputs.nixpkgs.lib;
+    in
     {
       flakeModules.default = import ./modules/flake-parts/default.nix { inherit inputs; };
 
       # Individually consumable, for repositories that are not themselves built
-      # on the flake-parts module above. The motivating case is an application's
-      # NixOS VM test: nixpkgs' pg_search trails ParadeDB by several minor
-      # versions on a release channel, so a test using it exercises a different
-      # extension than the host serves.
+      # on the flake-parts module above, e.g. an application's own NixOS VM
+      # test. A NixOS module rather than a package output: the feature builds
+      # the extension against `config.services.postgresql.package`, and a bare
+      # package would have to guess a PostgreSQL version.
       #
-      # A NixOS module rather than a package output on purpose — the feature
-      # builds the extension against `config.services.postgresql.package`, and a
-      # bare package would have to guess a PostgreSQL version and could load
-      # against the wrong server.
-      nixosModules.paradedb = import ./modules/nixos/features/paradedb.nix { inherit inputs; };
+      # Keyed so this same value can be imported both directly and, via
+      # `nstdl.profiles.nixos.paradedb` (modules/flake-parts/features/paradedb.nix),
+      # through the flake-parts module, without the two routes colliding.
+      nixosModules.paradedb = {
+        key = "nstdl#nixosModules.paradedb";
+        imports = [ (lib.modules.importApply ./modules/nixos/features/paradedb.nix { inherit inputs; }) ];
+      };
 
-      # Same reason: an application's VM test can run the host's object storage.
+      # Same reason: an application's VM test can run the host's object
+      # storage. A plain path, so it already dedupes like any other module.
       nixosModules.garage = ./modules/nixos/features/garage.nix;
 
-      checks = inputs.nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ] (system: {
+      checks = lib.genAttrs [ "x86_64-linux" "aarch64-linux" ] (system: {
         garage = import ./tests/garage.nix {
           pkgs = inputs.nixpkgs.legacyPackages.${system};
           module = ./modules/nixos/features/garage.nix;

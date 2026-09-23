@@ -8,9 +8,9 @@ let
   # The fully restricted preset. `relax` names keys of this set directly, so the
   # option's type is derived from it and a typo fails evaluation.
   #
-  # List-valued entries are the ones `extend` widens. They are lists rather than
-  # rendered strings so that extending is a concatenation; `renderList` puts
-  # them back together.
+  # List-valued entries are the ones `extend` widens: kept as lists so
+  # extending is a concatenation, and rendered as lists (below), so a
+  # `~`-prefixed `SystemCallFilter` deny entry lands on its own line.
   maximal = {
     NoNewPrivileges = true;
     CapabilityBoundingSet = [ ];
@@ -45,18 +45,28 @@ let
     SystemCallErrorNumber = "EPERM";
   };
 
-  # One string, not a list: NixOS renders a list as repeated assignments, and
-  # for the capability sets an empty list would emit no directive at all —
-  # unrestricted — where the empty string denies everything.
+  # Only the capability sets are joined into one string: NixOS renders a list
+  # as repeated assignments, and for these two an empty list would emit no
+  # directive at all — unrestricted — where the empty string denies
+  # everything. Every other list-valued directive is left as a list. This
+  # matters for `SystemCallFilter`: systemd recognizes a leading `~`
+  # (inversion) only as the first character of an assignment, so a joined
+  # "@system-service ~@privileged" silently drops the deny, where repeated
+  # `SystemCallFilter=` lines compose correctly, `~` entries included.
   renderList = lib.concatStringsSep " ";
+  capabilitySets = [
+    "CapabilityBoundingSet"
+    "AmbientCapabilities"
+  ];
 
   presetFor =
     sandbox:
     let
       # `relax` is applied to the preset before `extend` layers onto it, so a
       # directive that is both relaxed and extended replaces the baseline
-      # instead of dropping the extension. Hence: extend only widens, relax
-      # only drops, both replace.
+      # instead of dropping the extension. Hence: extend only adds entries
+      # (for `SystemCallFilter`, a `~`-prefixed entry among them denies),
+      # relax only drops, both replace.
       base = removeAttrs maximal sandbox.relax;
 
       # systemd grants ambient capabilities out of the bounding set and drops
@@ -75,7 +85,9 @@ let
     # rather than an opinion: any definition on the target unit wins, including
     # another module's `mkDefault`. Two `mkDefault`s would instead conflict.
     lib.mapAttrs (_: lib.mkOptionDefault) (
-      lib.mapAttrs (_: value: if lib.isList value then renderList value else value) merged
+      lib.mapAttrs (
+        name: value: if lib.isList value && lib.elem name capabilitySets then renderList value else value
+      ) merged
     );
 
   # A unit name that matches nothing is not an error: `systemd.services` accepts
@@ -114,7 +126,9 @@ in
               Deny by default: the service is assumed to need no network, no
               devices, no writable filesystem, no capabilities and no
               executable memory. `relax` drops directives from that preset and
-              `extend` widens the ones that take a list.
+              `extend` adds entries to the ones that take a list — for
+              `SystemCallFilter`, a `~`-prefixed entry denies instead of
+              widening.
 
               Applied at `mkOptionDefault`, below `mkDefault`, so any directive
               the unit sets itself wins and this only fills the gaps. Listing a
@@ -206,7 +220,12 @@ in
                     type = lib.types.listOf lib.types.str;
                     default = [ ];
                     example = [ "@chown" ];
-                    description = "Groups beyond the preset's `@system-service`.";
+                    description = ''
+                      Groups beyond the preset's `@system-service`, or, prefixed
+                      with `~`, calls denied on top of it. Entries apply in the
+                      order given — a `~`-prefixed group followed by an
+                      unprefixed call re-allows that call.
+                    '';
                   };
 
                   ReadWritePaths = lib.mkOption {

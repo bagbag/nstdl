@@ -25,20 +25,16 @@ rustPlatform.buildRustPackage rec {
   nativeBuildInputs = [ pkg-config ];
   buildInputs = [ openssl ];
 
-  # fenix ships upstream's unwrapped rustc, which does not carry nixpkgs'
-  # rustc rpath handling, so the linked binary has no path to libssl.so.3 and
-  # dies on load — both under `cargo test`, which spawns it, and later when
-  # buildPgrxExtension invokes it. Stated explicitly so it holds whichever
-  # toolchain builds this.
+  # On x86_64-linux, rustc links through its bundled rust-lld by default,
+  # which bypasses the ld wrapper and writes no RUNPATH (rust-lang/rust#162781,
+  # same cause as pg_search's). The linked binary then has no path to
+  # libssl.so.3 and dies on load — both under `cargo test`, which spawns it,
+  # and later when buildPgrxExtension invokes it. Stated explicitly so it
+  # holds whichever toolchain builds this.
   env.RUSTFLAGS = "-C link-arg=-Wl,-rpath,${lib.makeLibraryPath [ openssl ]}";
 
   preCheck = ''
     export PGRX_HOME=$(mktemp -d)
-
-    # tests/cli_upgrade.rs spawns the binary straight out of target/, before
-    # the install phase gives it an RPATH, so it cannot find libssl.so.3 and
-    # every assertion fails on the loader error instead of the CLI output.
-    export LD_LIBRARY_PATH=${lib.makeLibraryPath [ openssl ]}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
   '';
 
   checkFlags = [

@@ -21,6 +21,13 @@ let
   validKeyId = id: builtins.match "[A-Za-z0-9._-]{8,}" id != null;
   validBucket = name: builtins.match "[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]" name != null;
 
+  # Rejects a string carrying store context — an interpolated Nix path, which
+  # would copy the secret into the world-readable store. Same check as
+  # postgresql.nix's `runtimePathType`.
+  runtimePathType = lib.types.addCheck lib.types.nonEmptyStr (
+    path: lib.hasPrefix "/" path && !builtins.hasContext path
+  );
+
   credential = id: "key-${id}";
 
   bucketScript = name: ''
@@ -75,12 +82,12 @@ in
     package = lib.mkPackageOption pkgs "garage_2" { };
 
     rpcSecretFile = lib.mkOption {
-      type = lib.types.str;
+      type = runtimePathType;
       description = "File holding the RPC secret: 32 random bytes, hex-encoded. Read through systemd credentials.";
     };
 
     adminTokenFile = lib.mkOption {
-      type = lib.types.str;
+      type = runtimePathType;
       description = "File holding the admin API bearer token. Read through systemd credentials.";
     };
 
@@ -107,8 +114,8 @@ in
         lib.types.submodule {
           options = {
             secretKeyFile = lib.mkOption {
-              type = lib.types.str;
-              description = "File holding the secret key: at least 16 printable ASCII characters.";
+              type = runtimePathType;
+              description = "File holding the secret key: at least 16 non-space printable ASCII characters.";
             };
             allow = lib.mkOption {
               type = lib.types.attrsOf (lib.types.listOf (lib.types.enum permissions));
@@ -156,9 +163,9 @@ in
         rpc_bind_addr = "127.0.0.1:3901";
         rpc_public_addr = "127.0.0.1:3901";
         rpc_secret_file = "/run/credentials/garage.service/rpc-secret";
-        # systemd hands a DynamicUser its credentials as 0440 (the unit's own
-        # group), which Garage's 0600 check rejects. The credentials directory
-        # is private to the unit, so nothing else can read them either way.
+        # systemd grants the unit's user read access through an ACL, whose
+        # mask shows as group-readable (0440) and trips Garage's 0600 check.
+        # The credentials directory is private to the unit either way.
         allow_world_readable_secrets = true;
         s3_api = {
           s3_region = cfg.region;

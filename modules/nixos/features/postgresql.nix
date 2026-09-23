@@ -182,7 +182,7 @@ in
             ++ lib.concatMap (
               name:
               map (extension: ''
-                ${config.services.postgresql.package}/bin/psql --set=ON_ERROR_STOP=1 --dbname ${lib.escapeShellArg name} --command ${lib.escapeShellArg "CREATE EXTENSION IF NOT EXISTS \"${extension}\";"}
+                ${config.services.postgresql.package}/bin/psql --set=ON_ERROR_STOP=1 --dbname ${lib.escapeShellArg name} --command ${lib.escapeShellArg "CREATE EXTENSION IF NOT EXISTS \"${extension}\" CASCADE;"}
               '') managedDatabases.${name}.extensions
             ) (lib.attrNames managedDatabases)
             ++ lib.mapAttrsToList (name: _: ''

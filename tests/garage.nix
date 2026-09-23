@@ -73,6 +73,13 @@ pkgs.testers.runNixOSTest {
     };
 
     environment.systemPackages = [ pkgs.awscli2 ];
+
+    # Narrows alpha's key to read-only, so switching to it exercises
+    # DenyBucketKey against a permission that was actually granted: a
+    # no-op Deny would leave the write below succeeding.
+    specialisation.narrowed.configuration = {
+      services.nstdl.garage.keys.test-key-alpha.allow.alpha = pkgs.lib.mkForce [ "read" ];
+    };
   };
 
   testScript = ''
@@ -89,6 +96,14 @@ pkgs.testers.runNixOSTest {
     # Idempotent: a rerun changes nothing and succeeds.
     machine.succeed("systemctl restart garage-setup.service")
     machine.succeed("${alpha} s3 cp s3://alpha/object - | grep -qx hello")
+
+    # A previously granted permission is actually removed: alpha's key loses
+    # write on the "narrowed" specialisation, so this DenyBucketKey call is
+    # not a no-op.
+    machine.succeed("/run/current-system/specialisation/narrowed/bin/switch-to-configuration test")
+    machine.wait_for_unit("garage-setup.service")
+    machine.succeed("${alpha} s3 cp s3://alpha/object - | grep -qx hello")
+    machine.fail("${alpha} s3 cp /tmp/object s3://alpha/object")
 
     # A changed secret for an existing key ID fails loudly instead of diverging.
     machine.succeed("echo -n changed-secret-0123456789 > /etc/garage-test/alpha")
