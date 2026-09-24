@@ -502,11 +502,9 @@ def stopped_wants(show: str) -> list[str]:
     stopped = []
     for block in show.strip().split("\n\n"):
         unit = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
-        if (
-            unit.get("LoadState") == "loaded"
-            and unit.get("ActiveState") in ("inactive", "failed")
-            and unit.get("ConditionResult") != "no"
-        ):
+        loaded = unit.get("LoadState") == "loaded"
+        down = unit.get("ActiveState") in ("inactive", "failed")
+        if loaded and down and unit.get("ConditionResult") != "no":
             stopped.append(unit["Id"])
     return sorted(stopped)
 
