@@ -158,7 +158,9 @@ Before activating, it builds the system with `nom` output (on the host under
 package diff (`nix store diff-closures`), the store paths rebuilt under an
 existing name (configuration files and units included), and the units the
 switch would stop, start, restart or reload (`switch-to-configuration
-dry-activate` under `sudo`, which may ask for the password). Then it asks;
+dry-activate` under `sudo`, which may ask for the password), plus the units
+`multi-user.target` wants that are not running: the switch restarts that
+target, which starts them again — a service stopped by hand included. Then it asks;
 `--yes` skips the question. `--no-rollback` disables both deploy-rs rollbacks: meant for a failure a
 reboot clears, it also keeps a generation that locks you out. nstdl options go
 before the host.

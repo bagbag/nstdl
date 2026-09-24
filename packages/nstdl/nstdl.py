@@ -495,6 +495,22 @@ def rebuilt(old: list[str], new: list[str]) -> list[str]:
     return sorted({store_name(path) for path in added} & old_names)
 
 
+def stopped_wants(show: str) -> list[str]:
+    """From `systemctl show -p Id,LoadState,ActiveState,ConditionResult`: the
+    loaded units that are not running and whose last condition check passed —
+    the ones a start of the target that wants them starts again."""
+    stopped = []
+    for block in show.strip().split("\n\n"):
+        unit = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
+        if (
+            unit.get("LoadState") == "loaded"
+            and unit.get("ActiveState") in ("inactive", "failed")
+            and unit.get("ConditionResult") != "no"
+        ):
+            stopped.append(unit["Id"])
+    return sorted(stopped)
+
+
 def preview(host: str, node: dict, remote_build: bool, diff_files: bool) -> None:
     """Builds the host's system, puts it on the host and prints what changes
     against the running one — before deploy-rs, which then finds the build
@@ -545,6 +561,16 @@ def preview(host: str, node: dict, remote_build: bool, diff_files: bool) -> None
     units = subprocess.run(["ssh", *terminal, target, *sudo, f"{system}/bin/switch-to-configuration", "dry-activate"], stdout=sys.stderr)
     if units.returncode != 0:
         print(f"  (unit preview failed with status {units.returncode})", file=sys.stderr)
+
+    # dry-activate lists only what the switch acts on itself. The switch also
+    # stops and restarts multi-user.target, which starts every unit it wants
+    # that is not running — a service stopped by hand included.
+    wants = run(["ssh", target, "ls", f"{system}/etc/systemd/system/multi-user.target.wants"]).split()
+    if wants:
+        show = run(["ssh", target, "systemctl", "show", "-p", "Id,LoadState,ActiveState,ConditionResult", *wants])
+        stopped = stopped_wants(show)
+        if stopped:
+            print(f"would start again (wanted by multi-user.target, not running): {', '.join(stopped)}", file=sys.stderr)
 
 
 def deploy(manifest: Manifest, host: str, rest: list[str], no_rollback: bool, diff_files: bool, assume_yes: bool) -> int:

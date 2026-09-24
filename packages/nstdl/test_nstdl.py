@@ -467,6 +467,21 @@ class RebuiltTest(unittest.TestCase):
         self.assertEqual(nstdl.rebuilt(old, new), ["etc"])
 
 
+class StoppedWantsTest(unittest.TestCase):
+    def test_stopped_and_failed_units_whose_condition_passed(self):
+        show = "\n\n".join(
+            "\n".join(f"{key}={value}" for key, value in zip(("Id", "LoadState", "ActiveState", "ConditionResult"), unit))
+            for unit in (
+                ("stopped.service", "loaded", "inactive", "yes"),
+                ("failed.service", "loaded", "failed", "yes"),
+                ("running.service", "loaded", "active", "yes"),
+                ("skipped.service", "loaded", "inactive", "no"),
+                ("gone.service", "not-found", "inactive", "yes"),
+            )
+        )
+        self.assertEqual(nstdl.stopped_wants(show), ["failed.service", "stopped.service"])
+
+
 class DeployCommandTest(unittest.TestCase):
     """The command line as typed, through argparse, into stubs of nix, nom,
     ssh and deploy-rs that record their argv — the layer where a `--` is or is
@@ -497,6 +512,8 @@ case "$*" in
   *path-info*/run/current-system) echo /nix/store/aaa-etc /nix/store/bbb-hello-1.0 ;;
   *path-info*) echo /nix/store/ccc-etc /nix/store/ddd-hello-1.1 ;;
   *dry-activate) echo "would restart the following units: nginx.service" ;;
+  *multi-user.target.wants) echo "app.service nginx.service" ;;
+  *"systemctl show"*) printf "Id=app.service\\nLoadState=loaded\\nActiveState=inactive\\nConditionResult=yes\\n\\nId=nginx.service\\nLoadState=loaded\\nActiveState=active\\nConditionResult=yes\\n" ;;
   *"diff -ru"*) echo "-listen 80"; exit 1 ;;
 esac""",
         }
@@ -566,8 +583,11 @@ esac""",
                 "ssh admin@server.example nix --extra-experimental-features nix-command path-info --recursive /run/current-system",
                 "ssh admin@server.example nix --extra-experimental-features nix-command path-info --recursive /nix/store/new-system",
                 "ssh admin@server.example sudo /nix/store/new-system/bin/switch-to-configuration dry-activate",
+                "ssh admin@server.example ls /nix/store/new-system/etc/systemd/system/multi-user.target.wants",
+                "ssh admin@server.example systemctl show -p Id,LoadState,ActiveState,ConditionResult app.service nginx.service",
             ],
         )
+        self.assertIn("would start again (wanted by multi-user.target, not running): app.service", run.stderr)
         self.assertIn("hello: 1.0 → 1.1", run.stderr)
         self.assertIn("Rebuilt (1):\n  etc\n", run.stderr)
         self.assertIn("would restart the following units: nginx.service", run.stderr)
