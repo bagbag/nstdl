@@ -34,6 +34,7 @@ let
     [
       aria2
       bc
+      d2
       graphviz
       libpst
       repomix
@@ -48,7 +49,6 @@ let
           || pkgs.stdenv.hostPlatform.system == "aarch64-linux"
         )
         [
-          d2
           e2fsprogs
           iotop
           nmon
