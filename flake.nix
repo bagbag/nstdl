@@ -36,8 +36,9 @@
       inputs.flake-parts.follows = "flake-parts";
     };
 
+    # Temporary PR until main is fixed, then return to upstream main.
     ragenix = {
-      url = "github:yaxitech/ragenix";
+      url = "github:yaxitech/ragenix/pull/168/head";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 

@@ -365,9 +365,13 @@ configurations outside it, such as an application's VM test.
 ## Input sharing
 
 `nstdl` owns and locks its Home Manager, nix-darwin, nix-index-database, Disko,
-deploy-rs, and fenix inputs. Its defaults pair unstable nixpkgs with Home Manager
-master. A consumer using those defaults only needs to share `nixpkgs` and
-`flake-parts`, as shown above.
+deploy-rs, and fenix inputs. It temporarily uses
+[ragenix PR #168](https://github.com/yaxitech/ragenix/pull/168) for refreshed
+Cargo and flake dependencies. After that PR is merged, return the ragenix input
+to `github:yaxitech/ragenix` and update the lock file. Until then,
+`nix flake update ragenix` picks up new PR commits. The defaults pair unstable
+nixpkgs with Home Manager master. A consumer using those defaults only needs to
+share `nixpkgs` and `flake-parts`, as shown above.
 
 A stable consumer must provide a matching nixpkgs and Home Manager release and
 make nstdl follow both. For example, a 26.05 consumer uses:
