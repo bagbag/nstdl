@@ -488,19 +488,17 @@ def deploy_argv(nodes, host: str, rest: list[str], no_rollback: bool = False) ->
     misplaced = [argument for argument in rest if argument in NSTDL_DEPLOY_OPTIONS]
     if misplaced:
         raise Failure(f"put {', '.join(misplaced)} before the host: nstdl deploy {misplaced[0]} {host}")
-    changes_preview = {
+    preview_overrides = {
         "--hostname", "--ssh-user", "--profile-user", "--ssh-opts",
         "--sudo", "--groups", "--targets", "--file", "-f",
     }
-    unsupported = next(
-        (
-            argument for argument in rest
-            if argument == "--"
-            or argument.split("=", 1)[0] in changes_preview
-            or (argument.startswith("-") and not argument.startswith("--") and "f" in argument[1:])
-        ),
-        None,
-    )
+
+    def overrides_preview(argument: str) -> bool:
+        if argument == "--" or argument.split("=", 1)[0] in preview_overrides:
+            return True
+        return argument.startswith("-") and not argument.startswith("--") and "f" in argument[1:]
+
+    unsupported = next((argument for argument in rest if overrides_preview(argument)), None)
     if unsupported is not None:
         raise Failure(
             f"deploy-rs option {unsupported!r} can change the previewed target or build; "
