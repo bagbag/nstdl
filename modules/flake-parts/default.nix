@@ -556,7 +556,15 @@ in
         }) flakeConfig.flake.deploy.nodes;
         nstdl = pkgs.callPackage ../../packages/nstdl {
           manifest = pkgs.writeText "nstdl-manifest.json" (
-            builtins.toJSON (nstdlSecrets.manifest // { deploy.nodes = deployNodes; })
+            builtins.toJSON (
+              nstdlSecrets.manifest
+              // {
+                deploy.nodes = deployNodes;
+                hosts = lib.mapAttrs (_: host: {
+                  inherit (host) platform hostName;
+                }) validHosts;
+              }
+            )
           );
           agenix = lib.getExe config.agenix-rekey.package;
           flakeSource = self.outPath;

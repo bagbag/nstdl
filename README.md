@@ -148,22 +148,30 @@ Deploy through the same wrapper the secrets use:
 
 ```console
 ./nstdl deploy app-01                     # build, show the diff, ask, activate
-./nstdl diff app-01                       # same preview without activation
+./nstdl diff                              # preview the current NixOS or Darwin machine
+./nstdl diff --local app-01                # select a local host explicitly
+./nstdl diff app-01                       # preview a deployable NixOS host over SSH
 ./nstdl diff --remote-build app-01        # build on the host, then preview
 ./nstdl deploy --no-rollback app-01       # keep the generation even if activation fails
-./nstdl deploy --diff-files app-01        # also a unified diff of /etc
-./nstdl deploy app-01 -- --remote-build   # build on the host before activation
-./nstdl deploy app-01 -- --boot           # update next boot, no activation now
-./nstdl deploy app-01 -- --test           # activate without updating boot loader
+./nstdl deploy --diff-files app-01        # also show generated file contents
+./nstdl deploy app-01 --remote-build      # build on the host before activation
+./nstdl deploy app-01 --boot              # update next boot, no activation now
+./nstdl deploy app-01 --test              # activate without updating boot loader
 ```
 
-`diff` and `deploy` share the same preview. Before activating, `deploy` builds
-the system with `nom` output (on the host under
+With no host argument, `diff` matches the running machine's short hostname to
+`nstdl.hosts.*.hostName` and builds its declared NixOS or Darwin system locally.
+Use `--local HOST` when the machine name differs; `diff HOST` retains the remote
+SSH preview for a deployable NixOS host. `--remote-build` applies only to that
+remote preview. A local preview never activates the candidate.
+
+`diff HOST` and `deploy HOST` share the same remote preview. Before activating,
+`deploy` builds the system with `nom` output (on the host under
 `--remote-build`), copies it and shows, against the host's running system: the
 package diff (`nix store diff-closures`), the store paths rebuilt under an
 existing name (configuration files and units included), declared executable names
-added to or removed from the system and Home Manager paths, Home Manager package and managed
-file changes for users with a system service, and the units the
+added to or removed from the system and Home Manager paths, Home Manager package
+and managed file changes for activated users, and the units the
 switch would stop, start, restart or reload (`switch-to-configuration
 dry-activate` under `sudo`, which may ask for the password), plus the units
 `multi-user.target` wants that are not running: the switch restarts that
@@ -176,7 +184,11 @@ activation modes such as `--boot`, `--test`, and `--dry-activate` are passed
 through; nstdl labels the selected mode, and `--boot` skips the unit activation
 preview. Target, profile, SSH, and extra build overrides are refused because
 they would make the approved preview describe a different operation. Use
-deploy-rs directly when those overrides are needed.
+deploy-rs directly when those overrides are needed. Local NixOS previews include
+the same unit dry activation. Darwin previews report Launchd file changes but
+cannot predict every nix-darwin activation action. `--diff-files` prints `/etc`
+and Home Manager file contents; on Darwin it also shows Launchd, activation
+script, and Homebrew Brewfile contents.
 
 It runs the deploy-rs this flake locks, matching the `activate-rs` in the
 profile. A host whose secrets are missing or not rekeyed fails at evaluation.

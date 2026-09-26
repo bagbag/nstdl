@@ -1,6 +1,6 @@
 """nstdl: operations on the consuming flake, run from its root.
 
-Secrets and deploy discovery come from the manifest baked at evaluation time
+Secrets and host discovery come from the manifest baked at evaluation time
 ($NSTDL_MANIFEST). Installation evaluates only the selected host from the same
 frozen consumer flake. $NSTDL_AGENIX is the agenix-rekey command used to rekey
 and $NSTDL_DEPLOY the deploy-rs binary, present only for a flake that declares
@@ -25,6 +25,7 @@ import re
 import secrets
 import shlex
 import shutil
+import socket
 import stat
 import subprocess
 import sys
@@ -76,6 +77,7 @@ class Manifest:
         self.identities: list[str] = data["identities"]
         # Hosts that set `deployment.enable`, with their SSH destination.
         self.deploy_nodes: dict[str, dict] = data["deploy"]["nodes"]
+        self.hosts: dict[str, dict] = data.get("hosts", {})
         self.items = {
             name: Item(
                 name=name,
@@ -556,13 +558,53 @@ def stopped_wants(show: str) -> list[str]:
     return sorted(stopped)
 
 
-def remote_script(target: str, script: str) -> str:
-    return run(["ssh", target, "sh -s"], input="set -e\n" + script)
+def host_command(target: str | None, argv: list[str]) -> list[str]:
+    return ["ssh", target, *argv] if target else argv
 
 
-def home_generations(target: str, system: str) -> dict[str, str]:
-    """Read the HM generations the system's service units will activate."""
-    output = remote_script(target, f'''for unit in {shlex.quote(system)}/etc/systemd/system/home-manager-*.service; do
+def host_script(target: str | None, script: str) -> str:
+    return run(host_command(target, ["sh", "-s"]), input="set -e\n" + script)
+
+
+def resolved_path(target: str | None, path: str) -> str:
+    if target:
+        return run(["ssh", target, "readlink", "-f", path]).strip()
+    try:
+        return str(Path(path).resolve(strict=True))
+    except OSError as error:
+        raise Failure(f"cannot resolve {path}: {error}") from error
+
+
+def darwin_home_generations(system: str) -> dict[str, str]:
+    """Find each Home Manager generation called by nix-darwin's activation."""
+    try:
+        activation = (Path(system) / "activate").read_text()
+    except OSError as error:
+        raise Failure(f"cannot read {system}/activate: {error}") from error
+    generations = {}
+    for match in re.finditer(
+        r"(?P<path>/nix/store/[a-z0-9]{32}-activation-(?P<user>[A-Za-z0-9_.-]+))(?=\s|[\"'])",
+        activation,
+    ):
+        user = match.group("user")
+        try:
+            script = Path(match.group("path")).read_text()
+        except OSError as error:
+            raise Failure(f"cannot read Home Manager activation for {user}: {error}") from error
+        generation = re.search(r"/nix/store/[a-z0-9]{32}-home-manager-generation(?=/activate)", script)
+        if generation is None:
+            raise Failure(f"cannot identify Home Manager generation for {user} in {system}")
+        generations[user] = generation.group()
+    if "Activating home-manager configuration for" in activation and not generations:
+        raise Failure(f"cannot identify Home Manager users in {system}")
+    return generations
+
+
+def home_generations(target: str | None, system: str, platform: str) -> dict[str, str]:
+    """Read the Home Manager generations activated by this system."""
+    if platform == "darwin":
+        return darwin_home_generations(system)
+    output = host_script(target, f'''for unit in {shlex.quote(system)}/etc/systemd/system/home-manager-*.service; do
   [ -e "$unit" ] || continue
   awk -v unit="${{unit##*/}}" '
     /^User=/ {{ user=substr($0, 6) }}
@@ -581,26 +623,37 @@ done
     return generations
 
 
-def commands(target: str, paths: list[str]) -> set[str]:
+def commands(target: str | None, paths: list[str]) -> set[str]:
+    if target is None:
+        found = set()
+        for directory in paths:
+            path = Path(directory)
+            if not path.is_dir():
+                continue
+            try:
+                found.update(entry.name for entry in path.iterdir() if entry.is_file() and os.access(entry, os.X_OK))
+            except OSError as error:
+                raise Failure(f"cannot list commands in {directory}: {error}") from error
+        return found
     script = "for directory in " + " ".join(shlex.quote(path) for path in paths) + '''; do
   [ -d "$directory" ] || continue
   find -L "$directory" -mindepth 1 -maxdepth 1 -type f -executable -printf '%f\\n'
 done
 '''
-    return set(remote_script(target, script).splitlines())
+    return set(host_script(target, script).splitlines())
 
 
-def show_diff(target: str, host: str, system: str, diff_files: bool) -> None:
+def show_diff(target: str | None, host: str, system: str, diff_files: bool, platform: str = "nixos") -> None:
     """Compare a built candidate to the host's running system."""
     nix = ["nix", "--extra-experimental-features", "nix-command"]
-    current = run(["ssh", target, "readlink", "-f", "/run/current-system"]).strip()
+    current = resolved_path(target, "/run/current-system")
     if not current.startswith("/nix/store/"):
         raise Failure(f"cannot resolve {host}'s running system")
     print(f"\n{host}: {current} -> {system}\n\nPackages:", file=sys.stderr)
-    packages = run(["ssh", target, *nix, "store", "diff-closures", current, system])
+    packages = run(host_command(target, [*nix, "store", "diff-closures", current, system]))
     print(packages.rstrip() or "  (none)", file=sys.stderr)
 
-    old, new = (run(["ssh", target, *nix, "path-info", "--recursive", path]).split() for path in (current, system))
+    old, new = (run(host_command(target, [*nix, "path-info", "--recursive", path])).split() for path in (current, system))
     names = rebuilt(old, new)
     print(f"\nRebuilt ({len(names)}):", file=sys.stderr)
     shown = 40
@@ -609,8 +662,8 @@ def show_diff(target: str, host: str, system: str, diff_files: bool) -> None:
     if len(names) > shown:
         print(f"  ... and {len(names) - shown} more", file=sys.stderr)
 
-    old_home = home_generations(target, current)
-    new_home = home_generations(target, system)
+    old_home = home_generations(target, current, platform)
+    new_home = home_generations(target, system, platform)
     users = sorted(set(old_home) | set(new_home))
     before_system = commands(target, [f"{current}/sw/bin"])
     after_system = commands(target, [f"{system}/sw/bin"])
@@ -627,12 +680,12 @@ def show_diff(target: str, host: str, system: str, diff_files: bool) -> None:
             continue
         previous, candidate = old_home[user], new_home[user]
         print(f"\nHome Manager {user} packages:", file=sys.stderr)
-        old_path = run(["ssh", target, "readlink", "-f", f"{previous}/home-path"]).strip()
-        new_path = run(["ssh", target, "readlink", "-f", f"{candidate}/home-path"]).strip()
-        packages = run(["ssh", target, *nix, "store", "diff-closures", old_path, new_path])
+        old_path = resolved_path(target, f"{previous}/home-path")
+        new_path = resolved_path(target, f"{candidate}/home-path")
+        packages = run(host_command(target, [*nix, "store", "diff-closures", old_path, new_path]))
         print(packages.rstrip() or "  (none)", file=sys.stderr)
         print(f"Home Manager {user} files:", file=sys.stderr)
-        files = subprocess.run(["ssh", target, "diff", "-qr", f"{previous}/home-files", f"{candidate}/home-files"], stdout=sys.stderr)
+        files = subprocess.run(host_command(target, ["diff", "-ru" if diff_files else "-qr", f"{previous}/home-files", f"{candidate}/home-files"]), stdout=sys.stderr)
         if files.returncode > 1:
             raise Failure(f"Home Manager file diff for {user} exited with status {files.returncode}")
 
@@ -651,9 +704,38 @@ def show_diff(target: str, host: str, system: str, diff_files: bool) -> None:
 
     if diff_files:
         print("\nFiles:", file=sys.stderr)
-        files = subprocess.run(["ssh", target, "diff", "-ru", f"{current}/etc", f"{system}/etc"], stdout=sys.stderr)
+        files = subprocess.run(host_command(target, ["diff", "-ru", f"{current}/etc", f"{system}/etc"]), stdout=sys.stderr)
         if files.returncode > 1:
             raise Failure(f"diff of {host}'s /etc exited with status {files.returncode}")
+
+    if platform == "darwin":
+        print("\nLaunchd files:", file=sys.stderr)
+        for relative in ("Library/LaunchDaemons", "Library/LaunchAgents", "user/Library/LaunchAgents"):
+            before, after = Path(current) / relative, Path(system) / relative
+            if not before.exists() and not after.exists():
+                continue
+            if not before.exists() or not after.exists():
+                print(f"  {relative}: {'added' if after.exists() else 'removed'}", file=sys.stderr)
+                continue
+            files = subprocess.run(["diff", "-ru" if diff_files else "-qr", str(before), str(after)], stdout=sys.stderr)
+            if files.returncode > 1:
+                raise Failure(f"Launchd file diff for {relative} exited with status {files.returncode}")
+        if diff_files:
+            print("\nDarwin activation script:", file=sys.stderr)
+            files = subprocess.run(["diff", "-u", f"{current}/activate", f"{system}/activate"], stdout=sys.stderr)
+            if files.returncode > 1:
+                raise Failure(f"Darwin activation diff exited with status {files.returncode}")
+            before_brew = re.search(r"/nix/store/[a-z0-9]{32}-Brewfile", (Path(current) / "activate").read_text())
+            after_brew = re.search(r"/nix/store/[a-z0-9]{32}-Brewfile", (Path(system) / "activate").read_text())
+            if before_brew or after_brew:
+                print("\nHomebrew Brewfile:", file=sys.stderr)
+                before_file = before_brew.group() if before_brew else "/dev/null"
+                after_file = after_brew.group() if after_brew else "/dev/null"
+                files = subprocess.run(["diff", "-u", before_file, after_file], stdout=sys.stderr)
+                if files.returncode > 1:
+                    raise Failure(f"Homebrew Brewfile diff exited with status {files.returncode}")
+        print("\nActivation: nix-darwin has no safe unit dry-activation preview.", file=sys.stderr)
+        return
 
 
 def preview(host: str, node: dict, remote_build: bool, diff_files: bool, mode: str = "switch") -> None:
@@ -674,7 +756,10 @@ def preview(host: str, node: dict, remote_build: bool, diff_files: bool, mode: s
         print(f"Copying to {target}...", file=sys.stderr)
         run(["nix", "copy", "--substitute-on-destination", "--to", f"ssh://{target}", system])
     show_diff(target, host, system, diff_files)
+    show_units(target, system, mode)
 
+
+def show_units(target: str | None, system: str, mode: str) -> None:
     if mode == "boot only":
         print("\nUnits: boot mode updates the boot loader; it does not activate units now.", file=sys.stderr)
         return
@@ -683,18 +768,19 @@ def preview(host: str, node: dict, remote_build: bool, diff_files: bool, mode: s
     # may ask for a password, hence the terminal. Informational: the question
     # below still gates activation.
     print("\nUnits:", file=sys.stderr)
-    sudo = [] if node["sshUser"] == "root" else ["sudo"]
-    terminal = ["-t"] if sys.stdin.isatty() else []
-    units = subprocess.run(["ssh", *terminal, target, *sudo, f"{system}/bin/switch-to-configuration", "dry-activate"], stdout=sys.stderr)
+    sudo = [] if (target is None and os.geteuid() == 0) or (target is not None and target.split("@", 1)[0] == "root") else ["sudo"]
+    terminal = ["-t"] if target and sys.stdin.isatty() else []
+    units_command = [*sudo, f"{system}/bin/switch-to-configuration", "dry-activate"]
+    units = subprocess.run(["ssh", *terminal, target, *units_command] if target else units_command, stdout=sys.stderr)
     if units.returncode != 0:
         print(f"  (unit preview failed with status {units.returncode})", file=sys.stderr)
 
     # dry-activate lists only what the switch acts on itself. The switch also
     # stops and restarts multi-user.target, which starts every unit it wants
     # that is not running — a service stopped by hand included.
-    wants = run(["ssh", target, "ls", f"{system}/etc/systemd/system/multi-user.target.wants"]).split()
+    wants = run(host_command(target, ["ls", f"{system}/etc/systemd/system/multi-user.target.wants"])).split()
     if wants:
-        show = run(["ssh", target, "systemctl", "show", "-p", "Id,LoadState,ActiveState,ConditionResult", *wants])
+        show = run(host_command(target, ["systemctl", "show", "-p", "Id,LoadState,ActiveState,ConditionResult", *wants]))
         stopped = stopped_wants(show)
         if stopped:
             print(f"would start again (wanted by multi-user.target, not running): {', '.join(stopped)}", file=sys.stderr)
@@ -722,9 +808,43 @@ def deploy(manifest: Manifest, host: str, rest: list[str], no_rollback: bool, di
     os.execv(binary, [binary, *arguments])
 
 
-def diff(manifest: Manifest, host: str, remote_build: bool, diff_files: bool) -> int:
-    require_host(manifest.deploy_nodes, host)
-    preview(host, manifest.deploy_nodes[host], remote_build, diff_files)
+def local_host(manifest: Manifest) -> str:
+    running = socket.gethostname().split(".", 1)[0]
+    platform = "darwin" if sys.platform == "darwin" else "nixos"
+    matches = [
+        name for name, details in manifest.hosts.items()
+        if details["hostName"] == running and details["platform"] == platform
+    ]
+    if len(matches) != 1:
+        raise Failure(
+            f"cannot identify this {platform} host ({running!r}) from nstdl.hosts; "
+            "pass --local HOST explicitly"
+        )
+    return matches[0]
+
+
+def diff(manifest: Manifest, host: str | None, remote_build: bool, diff_files: bool, local: bool) -> int:
+    if local or host is None:
+        if remote_build:
+            raise Failure("--remote-build requires a remote HOST")
+        host = host or local_host(manifest)
+        if host not in manifest.hosts:
+            raise Failure(f"unknown local host {host!r}; declared hosts: {', '.join(sorted(manifest.hosts))}")
+        platform = manifest.hosts[host]["platform"]
+        if (platform == "darwin") != (sys.platform == "darwin"):
+            raise Failure(f"{host} is a {platform} host, but this machine runs {sys.platform}")
+        running = socket.gethostname().split(".", 1)[0]
+        if manifest.hosts[host]["hostName"] != running:
+            print(f"Local preview: comparing {host} with this machine ({running}).", file=sys.stderr)
+        output = "darwinConfigurations" if platform == "darwin" else "nixosConfigurations"
+        installable = f".#{output}.{host}.config.system.build.toplevel"
+        system = build_with_nom(["nix", "build", "--no-link", "--print-out-paths", installable])
+        show_diff(None, host, system, diff_files, platform)
+        if platform == "nixos":
+            show_units(None, system, "switch")
+    else:
+        require_host(manifest.deploy_nodes, host)
+        preview(host, manifest.deploy_nodes[host], remote_build, diff_files)
     return 0
 
 
@@ -1055,12 +1175,13 @@ def install_local_mode(manifest: Manifest, host: str, host_key: str | None, assu
 def parser(manifest: Manifest) -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
         prog="nstdl",
-        description="Operations on this flake: its age secrets and its deployable hosts. "
-        "Run through the ./nstdl wrapper at the flake root.",
+        description="Manage this flake's age secrets and declared hosts. "
+        "Run ./nstdl from the flake root.",
         epilog="Exit status: 0 success, 1 failure, 2 usage error, 3 drift (secret status --check). "
-        "`deploy` passes deploy-rs's own status through.",
+        "Deploy passes deploy-rs's own status through. "
+        "To prepare a new host key, run ./nstdl prepare-host-key HOST.",
     )
-    root.add_argument("--yes", action="store_true", help="allow changes without a terminal and skip confirmations")
+    root.add_argument("--yes", action="store_true", help="skip nstdl's deploy prompt and secret confirmations; place before COMMAND (unavailable for install)")
     nouns = root.add_subparsers(dest="noun", required=True, metavar="COMMAND")
 
     secret = nouns.add_parser("secret", help="age secrets declared in nstdl.secrets.items")
@@ -1081,28 +1202,37 @@ def parser(manifest: Manifest) -> argparse.ArgumentParser:
             command.add_argument("--replace", action="store_true", help="correct an existing entered value, after typing its name to confirm")
     verbs.add_parser("rekey", help="rekey every secret for its hosts")
 
-    diff_command = nouns.add_parser("diff", help="build a host and preview changes without activation")
-    diff_command.add_argument("--diff-files", action="store_true", help="also print a unified diff of /etc")
-    diff_command.add_argument("--remote-build", action="store_true", help="build on the target host")
-    diff_command.add_argument("host", metavar="HOST", help=", ".join(sorted(manifest.deploy_nodes)) or "no deployable hosts")
+    diff_command = nouns.add_parser(
+        "diff",
+        help="preview this machine, or a deployable NixOS host over SSH",
+        description="With no HOST, preview the declared host matching this machine. "
+        "Use --local HOST to select a local configuration explicitly. "
+        "With HOST alone, preview a deployable NixOS host over SSH. No activation occurs.",
+    )
+    diff_command.add_argument("--diff-files", action="store_true", help="also show generated /etc, Home Manager and Darwin file contents")
+    diff_command.add_argument("--remote-build", action="store_true", help="build on the remote target host")
+    diff_command.add_argument("--local", action="store_true", help="select a local configuration; omit HOST to detect it automatically")
+    diff_command.add_argument("host", nargs="?", metavar="HOST", help="remote deployable host, or local host with --local")
 
     deploy = nouns.add_parser(
         "deploy",
-        help="build a host, show what changes, and activate it with deploy-rs",
-        description="Builds the host's system, copies it to the host, shows what changes against the "
-        "running system — packages, rebuilt store paths, and the units the switch would touch — and asks "
-        "before deploy-rs activates it (--yes skips the question).",
+        help="build a host, show what changes, and run deploy-rs",
+        description="Builds the host's system and shows what changes against the "
+        "running system — packages, rebuilt store paths, and in switch mode the affected units — and asks "
+        "before invoking deploy-rs (--yes skips the question).",
+        epilog="Put nstdl options before HOST and deploy-rs options after HOST, without a -- separator. "
+        "Common deploy-rs options: --remote-build, --boot, --test, --dry-activate. "
+        "Target, profile, SSH and extra build overrides are refused.",
     )
     deploy.add_argument(
         "--diff-files",
         action="store_true",
-        help="also print a unified diff of the host's /etc, generated units included",
+        help="also show the host's /etc and Home Manager file contents",
     )
     deploy.add_argument(
         "--no-rollback",
         action="store_true",
-        help="keep the new generation even if activation fails or the host stops answering; "
-        "for a failure that a reboot clears",
+        help="disable activation and reachability rollbacks; failures can leave the host inaccessible",
     )
     deploy.add_argument(
         "host",
@@ -1114,8 +1244,8 @@ def parser(manifest: Manifest) -> argparse.ArgumentParser:
     deploy.add_argument(
         "rest",
         nargs=argparse.REMAINDER,
-        metavar="[-- DEPLOY-RS ARGUMENTS]",
-        help="deploy-rs options; target, profile, SSH and extra build overrides are refused",
+        metavar="DEPLOY-RS OPTION",
+        help="optional deploy-rs flags after HOST (no -- separator)",
     )
 
     installer = nouns.add_parser("install", help="install a declared NixOS host using Disko")
@@ -1135,14 +1265,17 @@ def parser(manifest: Manifest) -> argparse.ArgumentParser:
 
 def main(argv: list[str]) -> int:
     manifest = Manifest(os.environ["NSTDL_MANIFEST"])
-    args = parser(manifest).parse_args(argv)
+    cli = parser(manifest)
+    args = cli.parse_args(argv)
+    if args.noun == "deploy" and any(option in args.rest for option in ("-h", "--help")):
+        cli.parse_args(["deploy", "--help"])
     try:
         if not Path("flake.nix").is_file():
             raise Failure("run from the flake root (the ./nstdl wrapper does this)")
         if args.noun == "deploy":
             return deploy(manifest, args.host, args.rest, args.no_rollback, args.diff_files, args.yes)
         if args.noun == "diff":
-            return diff(manifest, args.host, args.remote_build, args.diff_files)
+            return diff(manifest, args.host, args.remote_build, args.diff_files, args.local)
         if args.noun == "install":
             if args.install_mode == "remote":
                 return install_remote_mode(manifest, args.host, args.target, args.host_key,

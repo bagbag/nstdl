@@ -768,13 +768,13 @@ class DiffInventoryTest(unittest.TestCase):
     def test_home_generation_uses_user_field_not_escaped_unit_name(self):
         generation = f"/nix/store/{'a' * 32}-home-manager-generation"
         output = f"home-manager-alice\\x2dops.service\talice-ops\t/nix/store/setup-env {generation}\n"
-        with mock.patch.object(nstdl, "remote_script", return_value=output):
-            self.assertEqual(nstdl.home_generations("host", "/run/current-system"), {"alice-ops": generation})
+        with mock.patch.object(nstdl, "host_script", return_value=output):
+            self.assertEqual(nstdl.home_generations("host", "/run/current-system", "nixos"), {"alice-ops": generation})
 
     def test_unparseable_home_unit_is_reported(self):
-        with mock.patch.object(nstdl, "remote_script", return_value="home-manager-admin.service\tadmin\t/no-generation\n"):
+        with mock.patch.object(nstdl, "host_script", return_value="home-manager-admin.service\tadmin\t/no-generation\n"):
             with self.assertRaises(nstdl.Failure):
-                nstdl.home_generations("host", "/run/current-system")
+                nstdl.home_generations("host", "/run/current-system", "nixos")
 
     def test_system_command_removal_is_visible_even_when_home_keeps_it(self):
         generation = f"/nix/store/{'a' * 32}-home-manager-generation"
