@@ -643,7 +643,7 @@ done
     return set(host_script(target, script).splitlines())
 
 
-def show_diff(target: str | None, host: str, system: str, diff_files: bool, platform: str = "nixos") -> None:
+def show_diff(target: str | None, host: str, system: str, diff_files: bool, nvd: str, platform: str = "nixos") -> None:
     """Compare a built candidate to the host's running system."""
     nix = ["nix", "--extra-experimental-features", "nix-command"]
     current = resolved_path(target, "/run/current-system")
@@ -652,6 +652,8 @@ def show_diff(target: str | None, host: str, system: str, diff_files: bool, plat
     print(f"\n{host}: {current} -> {system}\n\nPackages:", file=sys.stderr)
     packages = run(host_command(target, [*nix, "store", "diff-closures", current, system]))
     print(packages.rstrip() or "  (none)", file=sys.stderr)
+    print("\nSelected packages and closure size (NVD):", file=sys.stderr)
+    print(run(host_command(target, [nvd, "--color", "never", "diff", "--selected", current, system])).rstrip(), file=sys.stderr)
 
     old, new = (run(host_command(target, [*nix, "path-info", "--recursive", path])).split() for path in (current, system))
     names = rebuilt(old, new)
@@ -684,8 +686,10 @@ def show_diff(target: str | None, host: str, system: str, diff_files: bool, plat
         new_path = resolved_path(target, f"{candidate}/home-path")
         packages = run(host_command(target, [*nix, "store", "diff-closures", old_path, new_path]))
         print(packages.rstrip() or "  (none)", file=sys.stderr)
+        print(f"Home Manager {user} selected packages and closure size (NVD):", file=sys.stderr)
+        print(run(host_command(target, [nvd, "--color", "never", "diff", "--selected", old_path, new_path])).rstrip(), file=sys.stderr)
         print(f"Home Manager {user} files:", file=sys.stderr)
-        files = subprocess.run(host_command(target, ["diff", "-ru" if diff_files else "-qr", f"{previous}/home-files", f"{candidate}/home-files"]), stdout=sys.stderr)
+        files = subprocess.run(host_command(target, ["diff", "-ru" if diff_files else "-qr", "--no-dereference", f"{previous}/home-files", f"{candidate}/home-files"]), stdout=sys.stderr)
         if files.returncode > 1:
             raise Failure(f"Home Manager file diff for {user} exited with status {files.returncode}")
 
@@ -704,7 +708,7 @@ def show_diff(target: str | None, host: str, system: str, diff_files: bool, plat
 
     if diff_files:
         print("\nFiles:", file=sys.stderr)
-        files = subprocess.run(host_command(target, ["diff", "-ru", f"{current}/etc", f"{system}/etc"]), stdout=sys.stderr)
+        files = subprocess.run(host_command(target, ["diff", "-ru", "--no-dereference", f"{current}/etc", f"{system}/etc"]), stdout=sys.stderr)
         if files.returncode > 1:
             raise Failure(f"diff of {host}'s /etc exited with status {files.returncode}")
 
@@ -717,7 +721,7 @@ def show_diff(target: str | None, host: str, system: str, diff_files: bool, plat
             if not before.exists() or not after.exists():
                 print(f"  {relative}: {'added' if after.exists() else 'removed'}", file=sys.stderr)
                 continue
-            files = subprocess.run(["diff", "-ru" if diff_files else "-qr", str(before), str(after)], stdout=sys.stderr)
+            files = subprocess.run(["diff", "-ru" if diff_files else "-qr", "--no-dereference", str(before), str(after)], stdout=sys.stderr)
             if files.returncode > 1:
                 raise Failure(f"Launchd file diff for {relative} exited with status {files.returncode}")
         if diff_files:
@@ -738,6 +742,12 @@ def show_diff(target: str | None, host: str, system: str, diff_files: bool, plat
         return
 
 
+def build_on_host(target: str, installable: str) -> str:
+    derivation = run(["nix", "path-info", "--derivation", installable]).strip()
+    run(["nix", "copy", "--substitute-on-destination", "--derivation", "--to", f"ssh-ng://{target}", derivation])
+    return build_with_nom(["nix", "build", "--no-link", "--print-out-paths", "--store", f"ssh-ng://{target}", f"{derivation}^out"])
+
+
 def preview(host: str, node: dict, remote_build: bool, diff_files: bool, mode: str = "switch") -> None:
     """Builds the host's system, puts it on the host and prints what changes
     against the running one — before deploy-rs, which then finds the build
@@ -745,17 +755,18 @@ def preview(host: str, node: dict, remote_build: bool, diff_files: bool, mode: s
     both closures present."""
     target = f"{node['sshUser']}@{node['hostname']}"
     installable = f".#nixosConfigurations.{host}.config.system.build.toplevel"
+    nvd_installable = f".#nixosConfigurations.{host}.pkgs.nvd"
     if remote_build:
         # What deploy-rs' --remote-build does: the derivations travel, the
         # build runs on the host.
-        derivation = run(["nix", "path-info", "--derivation", installable]).strip()
-        run(["nix", "copy", "--substitute-on-destination", "--derivation", "--to", f"ssh-ng://{target}", derivation])
-        system = build_with_nom(["nix", "build", "--no-link", "--print-out-paths", "--store", f"ssh-ng://{target}", f"{derivation}^out"])
+        system = build_on_host(target, installable)
+        nvd = build_on_host(target, nvd_installable)
     else:
         system = build_with_nom(["nix", "build", "--no-link", "--print-out-paths", installable])
+        nvd = build_with_nom(["nix", "build", "--no-link", "--print-out-paths", nvd_installable])
         print(f"Copying to {target}...", file=sys.stderr)
-        run(["nix", "copy", "--substitute-on-destination", "--to", f"ssh://{target}", system])
-    show_diff(target, host, system, diff_files)
+        run(["nix", "copy", "--substitute-on-destination", "--to", f"ssh://{target}", system, nvd])
+    show_diff(target, host, system, diff_files, f"{nvd}/bin/nvd")
     show_units(target, system, mode)
 
 
@@ -839,7 +850,7 @@ def diff(manifest: Manifest, host: str | None, remote_build: bool, diff_files: b
         output = "darwinConfigurations" if platform == "darwin" else "nixosConfigurations"
         installable = f".#{output}.{host}.config.system.build.toplevel"
         system = build_with_nom(["nix", "build", "--no-link", "--print-out-paths", installable])
-        show_diff(None, host, system, diff_files, platform)
+        show_diff(None, host, system, diff_files, os.environ["NSTDL_NVD"], platform)
         if platform == "nixos":
             show_units(None, system, "switch")
     else:
@@ -1172,6 +1183,21 @@ def install_local_mode(manifest: Manifest, host: str, host_key: str | None, assu
     return 0
 
 
+def print_help_all(command: argparse.ArgumentParser) -> None:
+    print(command.format_help(), end="")
+    for action in command._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for child in action.choices.values():
+                print()
+                print_help_all(child)
+
+
+class HelpAllAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        print_help_all(parser)
+        parser.exit()
+
+
 def parser(manifest: Manifest) -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
         prog="nstdl",
@@ -1182,6 +1208,7 @@ def parser(manifest: Manifest) -> argparse.ArgumentParser:
         "To prepare a new host key, run ./nstdl prepare-host-key HOST.",
     )
     root.add_argument("--yes", action="store_true", help="skip nstdl's deploy prompt and secret confirmations; place before COMMAND (unavailable for install)")
+    root.add_argument("--help-all", nargs=0, action=HelpAllAction, help="show help for every command and exit")
     nouns = root.add_subparsers(dest="noun", required=True, metavar="COMMAND")
 
     secret = nouns.add_parser("secret", help="age secrets declared in nstdl.secrets.items")

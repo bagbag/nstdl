@@ -590,15 +590,24 @@ class DeployCommandTest(unittest.TestCase):
         stubs = {
             "deploy-rs": f'printf "%s\\n" "$@" > {self.log}',
             "nix": f"""echo "nix $*" >> {self.calls}
-case "$1" in
-  build) echo /nix/store/new-system ;;
-  path-info) echo /nix/store/system.drv ;;
+case "$*" in
+  *nixosConfigurations.server.pkgs.nvd*)
+    case "$1" in
+      build) echo /nix/store/aaa-nvd ;;
+      path-info) echo /nix/store/nvd.drv ;;
+    esac ;;
+  *nvd.drv^out*) echo /nix/store/aaa-nvd ;;
+  *) case "$1" in
+       build) echo /nix/store/new-system ;;
+       path-info) echo /nix/store/system.drv ;;
+     esac ;;
 esac""",
             "nom": f'echo nom >> {self.calls}; cat > /dev/null',
             "ssh": f"""echo "ssh $*" >> {self.calls}
 case "$*" in
   *readlink*-f*/run/current-system) echo /nix/store/old-system ;;
   *diff-closures*) echo "hello: 1.0 → 1.1" ;;
+  *nvd*diff*) echo "Selected package changes: hello 1.0 → 1.1; closure +1 path" ;;
   *path-info*/nix/store/old-system) echo /nix/store/aaa-etc /nix/store/bbb-hello-1.0 ;;
   *path-info*) echo /nix/store/ccc-etc /nix/store/ddd-hello-1.1 ;;
   *dry-activate) echo "would restart the following units: nginx.service" ;;
@@ -616,6 +625,7 @@ esac""",
             "PATH": f"{bin}:{os.environ['PATH']}",
             "NSTDL_MANIFEST": str(manifest),
             "NSTDL_DEPLOY": str(bin / "deploy-rs"),
+            "NSTDL_NVD": "/nix/store/local-nvd/bin/nvd",
         }
 
     def tearDown(self):
@@ -670,9 +680,11 @@ esac""",
             [call for call in calls if call != "nom"],
             [
                 "nix build --no-link --print-out-paths .#nixosConfigurations.server.config.system.build.toplevel --log-format internal-json -v",
-                "nix copy --substitute-on-destination --to ssh://admin@server.example /nix/store/new-system",
+                "nix build --no-link --print-out-paths .#nixosConfigurations.server.pkgs.nvd --log-format internal-json -v",
+                "nix copy --substitute-on-destination --to ssh://admin@server.example /nix/store/new-system /nix/store/aaa-nvd",
                 "ssh admin@server.example readlink -f /run/current-system",
                 "ssh admin@server.example nix --extra-experimental-features nix-command store diff-closures /nix/store/old-system /nix/store/new-system",
+                "ssh admin@server.example /nix/store/aaa-nvd/bin/nvd --color never diff --selected /nix/store/old-system /nix/store/new-system",
                 "ssh admin@server.example nix --extra-experimental-features nix-command path-info --recursive /nix/store/old-system",
                 "ssh admin@server.example nix --extra-experimental-features nix-command path-info --recursive /nix/store/new-system",
                 "ssh admin@server.example sh -s",
@@ -686,6 +698,7 @@ esac""",
         )
         self.assertIn("would start again (wanted by multi-user.target, not running): app.service", run.stderr)
         self.assertIn("hello: 1.0 → 1.1", run.stderr)
+        self.assertIn("Selected package changes: hello 1.0 → 1.1; closure +1 path", run.stderr)
         self.assertIn("Rebuilt (1):\n  etc\n", run.stderr)
         self.assertIn("System PATH commands: -(none); +(none)", run.stderr)
         self.assertIn("would restart the following units: nginx.service", run.stderr)
@@ -694,8 +707,21 @@ esac""",
     def test_diff_files_diffs_etc(self):
         run = self.invoke("--diff-files", "server")
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertIn("ssh admin@server.example diff -ru /nix/store/old-system/etc /nix/store/new-system/etc", self.calls.read_text())
+        self.assertIn("ssh admin@server.example diff -ru --no-dereference /nix/store/old-system/etc /nix/store/new-system/etc", self.calls.read_text())
         self.assertIn("-listen 80", run.stderr)
+
+    def test_help_all_lists_nested_commands_without_running_anything(self):
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--help-all"],
+            cwd=self.root,
+            env=self.environment,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for usage in ("usage: nstdl [-h]", "usage: nstdl secret set", "usage: nstdl install remote"):
+            self.assertIn(usage, result.stdout)
+        self.assertFalse(self.calls.exists())
 
     def test_diff_previews_without_deploying(self):
         result = subprocess.run(
@@ -718,11 +744,14 @@ esac""",
     def test_remote_build_builds_on_the_host(self):
         self.deploy("server", "--remote-build")
         self.assertEqual(
-            [call for call in self.calls.read_text().splitlines() if call != "nom"][:3],
+            [call for call in self.calls.read_text().splitlines() if call != "nom"][:6],
             [
                 "nix path-info --derivation .#nixosConfigurations.server.config.system.build.toplevel",
                 "nix copy --substitute-on-destination --derivation --to ssh-ng://admin@server.example /nix/store/system.drv",
                 "nix build --no-link --print-out-paths --store ssh-ng://admin@server.example /nix/store/system.drv^out --log-format internal-json -v",
+                "nix path-info --derivation .#nixosConfigurations.server.pkgs.nvd",
+                "nix copy --substitute-on-destination --derivation --to ssh-ng://admin@server.example /nix/store/nvd.drv",
+                "nix build --no-link --print-out-paths --store ssh-ng://admin@server.example /nix/store/nvd.drv^out --log-format internal-json -v",
             ],
         )
 
@@ -793,7 +822,7 @@ class DiffInventoryTest(unittest.TestCase):
              mock.patch.object(nstdl, "commands", side_effect=fake_commands), \
              mock.patch.object(nstdl.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), \
              mock.patch.object(sys, "stderr", new_callable=io.StringIO) as stderr:
-            nstdl.show_diff("host", "server", "/nix/store/system", False)
+            nstdl.show_diff("host", "server", "/nix/store/system", False, "/nix/store/nvd/bin/nvd")
         self.assertIn("System PATH commands: -tool; +(none)", stderr.getvalue())
         self.assertIn("admin: -(none); +(none)", stderr.getvalue())
 

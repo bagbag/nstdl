@@ -146,6 +146,8 @@ nstdl.hosts.app-01 = {
 
 Deploy through the same wrapper the secrets use:
 
+Run `./nstdl --help-all` to see the options for every CLI command at once.
+
 ```console
 ./nstdl deploy app-01                     # build, show the diff, ask, activate
 ./nstdl diff                              # preview the current NixOS or Darwin machine
@@ -168,9 +170,11 @@ remote preview. A local preview never activates the candidate.
 `diff HOST` and `deploy HOST` share the same remote preview. Before activating,
 `deploy` builds the system with `nom` output (on the host under
 `--remote-build`), copies it and shows, against the host's running system: the
-package diff (`nix store diff-closures`), the store paths rebuilt under an
-existing name (configuration files and units included), declared executable names
-added to or removed from the system and Home Manager paths, Home Manager package
+package diff (`nix store diff-closures`, including per-package size changes),
+an NVD summary of selected packages and total closure size, the store paths
+rebuilt under an existing name (configuration files and units included),
+declared executable names added to or removed from the system and Home Manager
+paths, Home Manager package
 and managed file changes for activated users, and the units the
 switch would stop, start, restart or reload (`switch-to-configuration
 dry-activate` under `sudo`, which may ask for the password), plus the units
@@ -189,6 +193,10 @@ the same unit dry activation. Darwin previews report Launchd file changes but
 cannot predict every nix-darwin activation action. `--diff-files` prints `/etc`
 and Home Manager file contents; on Darwin it also shows Launchd, activation
 script, and Homebrew Brewfile contents.
+
+The NVD summary repeats version changes for selected packages. It uses the
+declared NixOS host's native NVD package: ordinary previews build it locally
+and copy it with the system, while `--remote-build` builds it on the target.
 
 It runs the deploy-rs this flake locks, matching the `activate-rs` in the
 profile. A host whose secrets are missing or not rekeyed fails at evaluation.
