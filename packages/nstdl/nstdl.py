@@ -1,10 +1,10 @@
 """nstdl: operations on the consuming flake, run from its root.
 
-Everything about the flake comes from the manifest baked at evaluation time
-($NSTDL_MANIFEST), so the command follows the consumer's lock and never
-evaluates a host itself; $NSTDL_AGENIX is the agenix-rekey command used to
-rekey and $NSTDL_DEPLOY the deploy-rs binary, present only for a flake that
-declares a deployable host. `nix`, `ssh` and `nom` come from PATH.
+Secrets and deploy discovery come from the manifest baked at evaluation time
+($NSTDL_MANIFEST). Installation evaluates only the selected host from the same
+frozen consumer flake. $NSTDL_AGENIX is the agenix-rekey command used to rekey
+and $NSTDL_DEPLOY the deploy-rs binary, present only for a flake that declares
+a deployable host. `nix`, `ssh` and `nom` come from PATH.
 
 Secret values live only in memory and on the stdin of child processes. They
 are never passed as arguments and never written unencrypted, except to the
@@ -21,12 +21,15 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -92,8 +95,8 @@ class Manifest:
         return [item for item in self.items.values() if item.source == name]
 
 
-def run(argv: list[str], *, input: str | None = None, stdout=subprocess.PIPE) -> str:
-    result = subprocess.run(argv, input=input, stdout=stdout, text=True)
+def run(argv: list[str], *, input: str | None = None, stdout=subprocess.PIPE, env: dict | None = None) -> str:
+    result = subprocess.run(argv, input=input, stdout=stdout, text=True, env=env)
     if result.returncode != 0:
         raise Failure(f"{argv[0]} exited with status {result.returncode}")
     return result.stdout or ""
@@ -302,6 +305,18 @@ class Secrets:
         identity = hashlib.sha256((pubkey_hash + file_hash).encode()).hexdigest()[:32]
         return Path(host["rekeyedDir"]) / f"{identity}-{item.name}.age"
 
+    def derived_matches(self, item: Item) -> bool:
+        """Check a stored crypt hash using its own setting and current source."""
+        stored = self.decrypt(item).strip()
+        if not stored.startswith("$") or stored.count("$") < 3:
+            return False
+        source_value = self.decrypt(self.manifest.items[item.source])
+        if not source_value:
+            return False
+        setting = stored.rsplit("$", 1)[0]
+        candidate = run(["mkpasswd", f"--salt={setting}", "--stdin"], input=source_value).strip()
+        return hmac.compare_digest(candidate, stored)
+
     def status(self, check: bool) -> int:
         drift = False
         rows = [("SECRET", "STATE", "HOSTS")]
@@ -315,12 +330,21 @@ class Secrets:
                     state = "missing: run set" if item.entered else "missing: run sync"
             else:
                 state = "ok"
-                for host in item.hosts:
-                    if host["rekeyedDir"] is not None and not self.rekeyed_path(item, host).exists():
-                        state = "not rekeyed: run sync"
-                        hosts.append(f"{host['name']} (pending)")
-                    else:
-                        hosts.append(host["name"])
+                if source and not source.file.exists():
+                    state = f"source missing: run {'set' if source.entered else 'sync'} {source.name}"
+                elif source:
+                    try:
+                        if not self.derived_matches(item):
+                            state = "out of sync: run sync"
+                    except Failure:
+                        state = "cannot verify source/hash"
+                if state == "ok":
+                    for host in item.hosts:
+                        if host["rekeyedDir"] is not None and not self.rekeyed_path(item, host).exists():
+                            state = "not rekeyed: run sync"
+                            hosts.append(f"{host['name']} (pending)")
+                        else:
+                            hosts.append(host["name"])
             drift = drift or state != "ok"
             rows.append((item.name, state, ", ".join(hosts) or "-"))
         name_width = max(len(row[0]) for row in rows) + 2
@@ -331,18 +355,22 @@ class Secrets:
 
     def sync(self) -> int:
         self.require_changes_allowed()
-        # A hash left over from an earlier source would silently stop matching
-        # the source sync is about to generate; replacing it is the operator's call.
+        stale = set()
         for item in self.manifest.ordered():
             source = self.manifest.items[item.source] if item.source else None
-            if source and not source.entered and item.file.exists() and not source.file.exists():
+            if source and item.file.exists() and not source.file.exists():
                 raise Failure(
                     f"'{item.name}' exists but its source '{source.name}' does not; "
                     f"delete {item.file} explicitly, then run sync again"
                 )
-        created, pending, values = 0, [], {}
+            if source and item.file.exists() and not self.derived_matches(item):
+                stale.add(item.name)
+        created, repaired, pending, values = 0, 0, [], {}
         for item in self.manifest.ordered():
             if item.file.exists():
+                if item.name in stale:
+                    self.store(item, self.generate(item), replace=True)
+                    repaired += 1
                 continue
             if item.entered:
                 pending.append(item.name)
@@ -355,6 +383,8 @@ class Secrets:
             self.store(item, values[item.name], replace=False)
             created += 1
         print(f"Created {created} secret(s).", file=sys.stderr)
+        if repaired:
+            print(f"Repaired {repaired} derived hash(es).", file=sys.stderr)
         if pending:
             print(f"Still without a value (use `nstdl secret set`): {', '.join(pending)}", file=sys.stderr)
         self.rekey()
@@ -443,20 +473,39 @@ class Secrets:
 NSTDL_DEPLOY_OPTIONS = ("--no-rollback", "--diff-files")
 
 
-def deploy_argv(nodes, host: str, rest: list[str], no_rollback: bool = False) -> list[str]:
-    """deploy-rs' arguments. Everything after the host goes through untouched:
-    deploy-rs' flag surface is large and moves, so a curated copy here would be
-    a second thing to keep in sync. argparse.REMAINDER has already consumed the
-    optional separating `--`; any further one is deploy-rs' own."""
+def require_host(nodes: dict, host: str) -> None:
     if not nodes:
         raise Failure("no host in this flake sets deployment.enable")
     if host not in nodes:
         raise Failure(f"unknown host '{host}'; this flake deploys: {', '.join(sorted(nodes))}")
+
+
+def deploy_argv(nodes, host: str, rest: list[str], no_rollback: bool = False) -> list[str]:
+    """Keep the preview's host, account and build aligned with deploy-rs."""
+    require_host(nodes, host)
     # REMAINDER swallows anything after the host, so a misplaced nstdl option
     # would reach deploy-rs as an unknown flag.
     misplaced = [argument for argument in rest if argument in NSTDL_DEPLOY_OPTIONS]
     if misplaced:
         raise Failure(f"put {', '.join(misplaced)} before the host: nstdl deploy {misplaced[0]} {host}")
+    changes_preview = {
+        "--hostname", "--ssh-user", "--profile-user", "--ssh-opts",
+        "--sudo", "--groups", "--targets", "--file", "-f",
+    }
+    unsupported = next(
+        (
+            argument for argument in rest
+            if argument == "--"
+            or argument.split("=", 1)[0] in changes_preview
+            or (argument.startswith("-") and not argument.startswith("--") and "f" in argument[1:])
+        ),
+        None,
+    )
+    if unsupported is not None:
+        raise Failure(
+            f"deploy-rs option {unsupported!r} can change the previewed target or build; "
+            "use deploy-rs directly for that option"
+        )
     # Both: magic rollback reverts when the deployer cannot confirm the new
     # generation over a fresh connection, auto rollback when activation fails.
     rollback = ["--magic-rollback", "false", "--auto-rollback", "false"] if no_rollback else []
@@ -509,7 +558,107 @@ def stopped_wants(show: str) -> list[str]:
     return sorted(stopped)
 
 
-def preview(host: str, node: dict, remote_build: bool, diff_files: bool) -> None:
+def remote_script(target: str, script: str) -> str:
+    return run(["ssh", target, "sh -s"], input="set -e\n" + script)
+
+
+def home_generations(target: str, system: str) -> dict[str, str]:
+    """Read the HM generations the system's service units will activate."""
+    output = remote_script(target, f'''for unit in {shlex.quote(system)}/etc/systemd/system/home-manager-*.service; do
+  [ -e "$unit" ] || continue
+  awk -v unit="${{unit##*/}}" '
+    /^User=/ {{ user=substr($0, 6) }}
+    /^ExecStart=/ {{ start=substr($0, 11) }}
+    END {{ printf "%s\\t%s\\t%s\\n", unit, user, start }}
+  ' "$unit"
+done
+''')
+    generations = {}
+    for line in output.splitlines():
+        unit, user, start = line.split("\t", 2)
+        match = re.search(r"/nix/store/[a-z0-9]{32}-home-manager-generation(?=\s|/|$)", start)
+        if not user or not match or user in generations:
+            raise Failure(f"cannot identify Home Manager user/generation in {system}: {unit}")
+        generations[user] = match.group()
+    return generations
+
+
+def commands(target: str, paths: list[str]) -> set[str]:
+    script = "for directory in " + " ".join(shlex.quote(path) for path in paths) + '''; do
+  [ -d "$directory" ] || continue
+  find -L "$directory" -mindepth 1 -maxdepth 1 -type f -executable -printf '%f\\n'
+done
+'''
+    return set(remote_script(target, script).splitlines())
+
+
+def show_diff(target: str, host: str, system: str, diff_files: bool) -> None:
+    """Compare a built candidate to the host's running system."""
+    nix = ["nix", "--extra-experimental-features", "nix-command"]
+    current = run(["ssh", target, "readlink", "-f", "/run/current-system"]).strip()
+    if not current.startswith("/nix/store/"):
+        raise Failure(f"cannot resolve {host}'s running system")
+    print(f"\n{host}: {current} -> {system}\n\nPackages:", file=sys.stderr)
+    packages = run(["ssh", target, *nix, "store", "diff-closures", current, system])
+    print(packages.rstrip() or "  (none)", file=sys.stderr)
+
+    old, new = (run(["ssh", target, *nix, "path-info", "--recursive", path]).split() for path in (current, system))
+    names = rebuilt(old, new)
+    print(f"\nRebuilt ({len(names)}):", file=sys.stderr)
+    shown = 40
+    for name in names[:shown]:
+        print(f"  {name}", file=sys.stderr)
+    if len(names) > shown:
+        print(f"  ... and {len(names) - shown} more", file=sys.stderr)
+
+    old_home = home_generations(target, current)
+    new_home = home_generations(target, system)
+    users = sorted(set(old_home) | set(new_home))
+    before_system = commands(target, [f"{current}/sw/bin"])
+    after_system = commands(target, [f"{system}/sw/bin"])
+    print(f"\nSystem PATH commands: -{', '.join(sorted(before_system - after_system)) or '(none)'}; +{', '.join(sorted(after_system - before_system)) or '(none)'}", file=sys.stderr)
+    for user in users:
+        if user not in old_home or user not in new_home:
+            state = "added" if user in new_home else "removed"
+            generation = new_home.get(user) or old_home[user]
+            print(f"\nHome Manager {user}: {state} generation {generation}", file=sys.stderr)
+            other = "previous" if state == "added" else "candidate"
+            print(f"  No {other} Home Manager generation to compare packages or files; declared command changes follow below.", file=sys.stderr)
+            if state == "removed":
+                print("  Existing files in the user's home are not removed by this comparison.", file=sys.stderr)
+            continue
+        previous, candidate = old_home[user], new_home[user]
+        print(f"\nHome Manager {user} packages:", file=sys.stderr)
+        old_path = run(["ssh", target, "readlink", "-f", f"{previous}/home-path"]).strip()
+        new_path = run(["ssh", target, "readlink", "-f", f"{candidate}/home-path"]).strip()
+        packages = run(["ssh", target, *nix, "store", "diff-closures", old_path, new_path])
+        print(packages.rstrip() or "  (none)", file=sys.stderr)
+        print(f"Home Manager {user} files:", file=sys.stderr)
+        files = subprocess.run(["ssh", target, "diff", "-qr", f"{previous}/home-files", f"{candidate}/home-files"], stdout=sys.stderr)
+        if files.returncode > 1:
+            raise Failure(f"Home Manager file diff for {user} exited with status {files.returncode}")
+
+    if users:
+        print("\nDeclared PATH commands by Home Manager user:", file=sys.stderr)
+        for user in users:
+            old_paths = [f"{current}/sw/bin", f"{current}/etc/profiles/per-user/{user}/bin"]
+            new_paths = [f"{system}/sw/bin", f"{system}/etc/profiles/per-user/{user}/bin"]
+            if user in old_home:
+                old_paths.append(f"{old_home[user]}/home-path/bin")
+            if user in new_home:
+                new_paths.append(f"{new_home[user]}/home-path/bin")
+            before, after = commands(target, old_paths), commands(target, new_paths)
+            removed, added = sorted(before - after), sorted(after - before)
+            print(f"  {user}: -{', '.join(removed) or '(none)'}; +{', '.join(added) or '(none)'}", file=sys.stderr)
+
+    if diff_files:
+        print("\nFiles:", file=sys.stderr)
+        files = subprocess.run(["ssh", target, "diff", "-ru", f"{current}/etc", f"{system}/etc"], stdout=sys.stderr)
+        if files.returncode > 1:
+            raise Failure(f"diff of {host}'s /etc exited with status {files.returncode}")
+
+
+def preview(host: str, node: dict, remote_build: bool, diff_files: bool, mode: str = "switch") -> None:
     """Builds the host's system, puts it on the host and prints what changes
     against the running one — before deploy-rs, which then finds the build
     and the copy already done. Everything runs on the host: only there are
@@ -526,29 +675,11 @@ def preview(host: str, node: dict, remote_build: bool, diff_files: bool) -> None
         system = build_with_nom(["nix", "build", "--no-link", "--print-out-paths", installable])
         print(f"Copying to {target}...", file=sys.stderr)
         run(["nix", "copy", "--substitute-on-destination", "--to", f"ssh://{target}", system])
-    nix = ["nix", "--extra-experimental-features", "nix-command"]
-    current = "/run/current-system"
+    show_diff(target, host, system, diff_files)
 
-    print(f"\n{host}: {current} -> {system}\n\nPackages:", file=sys.stderr)
-    packages = run(["ssh", target, *nix, "store", "diff-closures", current, system])
-    print(packages.rstrip() or "  (none)", file=sys.stderr)
-
-    old, new = (run(["ssh", target, *nix, "path-info", "--recursive", path]).split() for path in (current, system))
-    names = rebuilt(old, new)
-    print(f"\nRebuilt ({len(names)}):", file=sys.stderr)
-    shown = 40
-    for name in names[:shown]:
-        print(f"  {name}", file=sys.stderr)
-    if len(names) > shown:
-        print(f"  ... and {len(names) - shown} more", file=sys.stderr)
-
-    if diff_files:
-        # /etc holds every generated configuration file, units included;
-        # diff follows its links into the store. Status 1 means "differs".
-        print("\nFiles:", file=sys.stderr)
-        files = subprocess.run(["ssh", target, "diff", "-ru", f"{current}/etc", f"{system}/etc"], stdout=sys.stderr)
-        if files.returncode > 1:
-            raise Failure(f"diff of {host}'s /etc exited with status {files.returncode}")
+    if mode == "boot only":
+        print("\nUnits: boot mode updates the boot loader; it does not activate units now.", file=sys.stderr)
+        return
 
     # Root only (switch-to-configuration refuses otherwise), so sudo — which
     # may ask for a password, hence the terminal. Informational: the question
@@ -573,14 +704,17 @@ def preview(host: str, node: dict, remote_build: bool, diff_files: bool) -> None
 
 def deploy(manifest: Manifest, host: str, rest: list[str], no_rollback: bool, diff_files: bool, assume_yes: bool) -> int:
     arguments = deploy_argv(manifest.deploy_nodes, host, rest, no_rollback)
+    options = arguments[1:]
     # Set whenever a node is declared: the module derives both from one list.
     binary = os.environ["NSTDL_DEPLOY"]
     if not assume_yes and not sys.stdin.isatty():
         raise Failure("refusing to deploy without a terminal; pass --yes to allow it")
-    preview(host, manifest.deploy_nodes[host], "--remote-build" in rest, diff_files)
+    mode = next((name for flag, name in (("--boot", "boot only"), ("--test", "test activation"), ("--dry-activate", "dry activation")) if flag in options), "switch")
+    print(f"Deploy mode: {mode}.", file=sys.stderr)
+    preview(host, manifest.deploy_nodes[host], "--remote-build" in options, diff_files, mode)
     if no_rollback:
         print("Rollback disabled: a failed activation stays in place.", file=sys.stderr)
-    if not assume_yes and input(f"Activate on {host}? [y/N] ").strip().lower() not in ("y", "yes"):
+    if not assume_yes and input(f"Run {mode} on {host}? [y/N] ").strip().lower() not in ("y", "yes"):
         print("Not deployed.", file=sys.stderr)
         return EXIT_FAILURE
     print(f"Deploying {host}...", file=sys.stderr)
@@ -588,6 +722,336 @@ def deploy(manifest: Manifest, host: str, rest: list[str], no_rollback: bool, di
     # output, an interactive sudo prompt, the magic-rollback confirmation, and
     # Ctrl-C reaching the activation rather than this wrapper.
     os.execv(binary, [binary, *arguments])
+
+
+def diff(manifest: Manifest, host: str, remote_build: bool, diff_files: bool) -> int:
+    require_host(manifest.deploy_nodes, host)
+    preview(host, manifest.deploy_nodes[host], remote_build, diff_files)
+    return 0
+
+
+# -- install -----------------------------------------------------------------
+
+
+def install_config_ref(host: str) -> str:
+    metadata = json.loads(run(["nix", "flake", "metadata", "--json", "--no-write-lock-file", "."]))
+    source = metadata["path"]
+    if not Path(source).is_relative_to("/nix/store"):
+        raise Failure("Nix did not resolve this flake to an immutable store snapshot")
+    if source != os.environ["NSTDL_SOURCE"]:
+        raise Failure("the flake changed since this nstdl binary was built; rerun ./nstdl from this checkout")
+    return f"path:{source}#nixosConfigurations.{json.dumps(host)}.config"
+
+
+def install_eval(config_ref: str, attr: str, apply: str | None = None):
+    argv = ["nix", "eval", "--json", config_ref + (f".{attr}" if attr else "")]
+    if apply is not None:
+        argv += ["--apply", apply]
+    return json.loads(run(argv))
+
+
+def install_shell(target: str | None, script: str) -> str:
+    if target is None:
+        return run(["sh", "-s"], input="set -e\n" + script)
+    # Match the selected upstream transport policy. This does not authenticate
+    # the installer endpoint, even if a separate SSH probe succeeded earlier.
+    return run([
+        "ssh", "-o", "UserKnownHostsFile=/dev/null", "-o", "StrictHostKeyChecking=no",
+        "-o", "ConnectTimeout=10", target, "sh -s",
+    ], input="set -e\n" + script)
+
+
+def install_disk_facts(target: str | None, devices: dict[str, str]) -> dict[str, tuple]:
+    facts = {}
+    for name, device in devices.items():
+        if not re.fullmatch(r"/dev/[A-Za-z0-9_./+-]+", device) or ".." in Path(device).parts:
+            raise Failure(f"unsupported Disko device path for '{name}': {device}")
+        output = install_shell(target, f"readlink -f {shlex.quote(device)}\nlsblk --json --bytes --output PATH,SIZE,TYPE,MOUNTPOINTS {shlex.quote(device)}\n")
+        resolved, _, listing = output.partition("\n")
+        blocks = json.loads(listing)["blockdevices"]
+        if len(blocks) != 1 or blocks[0]["type"] != "disk":
+            raise Failure(f"'{device}' is not one whole disk on {target or 'this installer'}")
+        disk = blocks[0]
+        facts[name] = (resolved, int(disk["size"]), disk["type"])
+
+        def mounted(block: dict) -> list[str]:
+            return [mount for mount in (block.get("mountpoints") or []) if mount] + [
+                mount for child in (block.get("children") or []) for mount in mounted(child)
+            ]
+        mounts = mounted(disk)
+        print(f"  {name}: {device} -> {resolved}, {disk['size']} bytes; mounts: {', '.join(mounts) or '(none)'}", file=sys.stderr)
+        if mounts:
+            facts[name] = (*facts[name], "mounted")
+    resolved = [fact[0] for fact in facts.values()]
+    if len(set(resolved)) != len(resolved):
+        raise Failure("multiple Disko disk names resolve to the same device")
+    return facts
+
+
+def is_installer(target: str | None) -> bool:
+    release = install_shell(target, "cat /etc/os-release\n")
+    fields = dict(match.groups() for match in re.finditer(r'^([A-Z_]+)="?([^"\n]*)"?$', release, re.M))
+    return fields.get("ID") == "nixos" and fields.get("VARIANT_ID") == "installer"
+
+
+def require_installer(target: str | None) -> None:
+    if not is_installer(target):
+        raise Failure(f"{target or 'this machine'} must be booted into a NixOS installer")
+
+
+def confirm_install(host: str, devices: dict[str, str], action: str) -> None:
+    confirmation = f"{host} {' '.join(devices.values())}"
+    if input(f"{action}; this destroys contents on these disks. Type '{confirmation}' to proceed: ") != confirmation:
+        raise Failure("installation not confirmed")
+
+
+def require_unmounted(facts: dict[str, tuple]) -> None:
+    if any(len(fact) > 3 for fact in facts.values()):
+        raise Failure("a selected disk is mounted in the installer; no disk was formatted")
+
+
+def require_empty_install_root(target: str | None) -> None:
+    occupied = install_shell(target, "if mountpoint -q /mnt; then printf occupied; fi\n")
+    if occupied:
+        raise Failure("/mnt is already mounted in the installer; no disk was formatted")
+
+
+def stage_install_key(source_path: str, key_path: str, staging: Path) -> tuple[Path, str]:
+    source = Path(source_path).expanduser()
+    staged = staging / key_path.lstrip("/")
+    staged.parent.mkdir(parents=True)
+    try:
+        with source.open("rb") as original:
+            info = os.fstat(original.fileno())
+            if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) & 0o077:
+                raise Failure(f"host key must be a private file readable only by its owner: {source}")
+            descriptor = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "wb") as copy:
+                shutil.copyfileobj(original, copy)
+    except OSError as error:
+        raise Failure(f"cannot stage host key {source}: {error.strerror}") from error
+    public = installed_public_key(staged)
+    staged.with_name(staged.name + ".pub").write_text(public + "\n")
+    return staged, public
+
+
+def installed_public_key(private: Path) -> str:
+    if not private.is_file() or stat.S_IMODE(private.stat().st_mode) & 0o077:
+        raise Failure(f"host key must be a private file readable only by its owner: {private}")
+    public = run(["ssh-keygen", "-y", "-P", "", "-f", str(private)]).split()
+    if len(public) < 2 or public[0] != "ssh-ed25519":
+        raise Failure("--host-key must be an unencrypted Ed25519 private key")
+    return " ".join(public[:2])
+
+
+def verify_install(target: str, public: str, system: str, key_path: str, secrets: dict, mounts: dict, directory: Path) -> None:
+    known_hosts = directory / "known_hosts"
+    known_hosts.write_text(f"nstdl-installed {public}\n")
+    ssh = [
+        "ssh", "-o", "HostKeyAlias=nstdl-installed",
+        "-o", f"UserKnownHostsFile={known_hosts}",
+        "-o", "GlobalKnownHostsFile=/dev/null", "-o", "StrictHostKeyChecking=yes",
+        "-o", "UpdateHostKeys=no", "-o", "CheckHostIP=no",
+        "-o", "ControlPath=none", "-o", "ConnectTimeout=10", target,
+    ]
+    deadline = time.monotonic() + 300
+    while True:
+        result = subprocess.run([*ssh, "readlink -f /run/current-system"], capture_output=True, text=True)
+        if result.returncode == 0:
+            break
+        if time.monotonic() >= deadline:
+            raise Failure(f"installed host did not return with the expected SSH key at {target}")
+        time.sleep(5)
+    if result.stdout.strip() != system:
+        raise Failure(f"installed host is running {result.stdout.strip()!r}, expected {system}")
+    privileged = "" if target.startswith("root@") else "sudo -n "
+    actual_key = run([*ssh, "sh -s"], input=f"{privileged}ssh-keygen -y -P '' -f {shlex.quote(key_path)}\n").split()
+    if " ".join(actual_key[:2]) != public:
+        raise Failure("installed SSH host key differs from --host-key")
+    for mount, info in mounts.items():
+        if "noauto" in info["options"]:
+            continue
+        filesystem = run([*ssh, "sh -s"], input=f"findmnt --mountpoint {shlex.quote(mount)} --noheadings --output FSTYPE\n").strip()
+        concrete_type = info["fsType"] not in ("", "auto", "none") and not {"bind", "rbind"}.intersection(info["options"])
+        if concrete_type and filesystem != info["fsType"]:
+            raise Failure(f"{mount} is mounted as {filesystem!r}, expected {info['fsType']!r}")
+    for name, secret in secrets.items():
+        actual = run([*ssh, "sh -s"], input=f"{privileged}stat -Lc '%a:%U:%G' -- {shlex.quote(secret['path'])}\n").strip()
+        mode, owner, group = actual.split(":", 2)
+        if (int(mode, 8), owner, group) != (int(secret["mode"], 8), secret["owner"], secret["group"]):
+            raise Failure(f"installed secret {name} has unexpected mode or owner")
+    print(f"Installed {system} on {target}; SSH host key, declared mounts and secret metadata match.", file=sys.stderr)
+
+
+@dataclass(frozen=True)
+class InstallPlan:
+    host: str
+    config: str
+    devices: dict[str, str]
+    key_path: str
+    public: str
+    secrets: dict
+    mounts: dict
+    disk_script: str
+    system: str
+
+
+def install_plan(manifest: Manifest, host: str, host_key: str | None, staging: Path, roots: Path) -> InstallPlan:
+    config = install_config_ref(host)
+    devices = install_eval(config, "disko.devices.disk", "disks: builtins.mapAttrs (_: disk: disk.device) disks")
+    if not isinstance(devices, dict) or not devices:
+        raise Failure(f"{host} has no declared Disko disks")
+    if install_eval(config, "disko.rootMountPoint") != "/mnt":
+        raise Failure(f"{host} needs disko.rootMountPoint = /mnt for this installer")
+    keys = install_eval(config, "services.openssh.hostKeys")
+    ed25519 = [key["path"] for key in keys if key["type"] == "ed25519"]
+    if len(ed25519) != 1 or not ed25519[0].startswith("/etc/") or ".." in Path(ed25519[0]).parts:
+        raise Failure(f"{host} needs exactly one Ed25519 SSH host key under /etc")
+    key_path = ed25519[0]
+    if not install_eval(config, "services.openssh.enable"):
+        raise Failure(f"{host} does not enable OpenSSH for post-install identity checks")
+    source_key = host_key or f".installer-host-keys/{host}/ssh_host_ed25519_key"
+    _, public = stage_install_key(source_key, key_path, staging)
+    declared = install_eval(
+        config, "", "c: if c ? age && c.age ? rekey then c.age.rekey.hostPubkey else null",
+    )
+    if declared is not None and " ".join(declared.split()[:2]) != public:
+        raise Failure(f"--host-key does not match {host}'s declared SSH host recipient")
+    recipients = {
+        " ".join(assigned["pubkey"].split()[:2])
+        for item in manifest.items.values() for assigned in item.hosts if assigned["name"] == host
+    }
+    if recipients and recipients != {public}:
+        raise Failure(f"--host-key does not match {host}'s declared runtime secret recipient")
+    if recipients and key_path not in install_eval(config, "age.identityPaths"):
+        raise Failure(f"{key_path} is not a runtime age identity for {host}")
+    secrets = install_eval(
+        config, "",
+        "c: if c ? age then builtins.mapAttrs (_: s: { inherit (s) path mode owner group; }) c.age.secrets else {}",
+    )
+    mounts = install_eval(config, "fileSystems", "fs: builtins.mapAttrs (_: f: { inherit (f) fsType options; }) fs")
+    print(f"Installing {host} from {config}", file=sys.stderr)
+    disk_script = build_with_nom(["nix", "build", "--out-link", str(roots / "disko"), "--print-out-paths", f"{config}.system.build.diskoScript"])
+    system = build_with_nom(["nix", "build", "--out-link", str(roots / "system"), "--print-out-paths", f"{config}.system.build.toplevel"])
+    print(f"Disko: {disk_script}\nSystem: {system}\nInstalled host key: {public}", file=sys.stderr)
+    return InstallPlan(host, config, devices, key_path, public, secrets, mounts, disk_script, system)
+
+
+def require_install_confirmation(assume_yes: bool) -> None:
+    if assume_yes or not sys.stdin.isatty():
+        raise Failure("install needs a terminal and a typed host/device confirmation; --yes is unavailable")
+
+
+def install_remote_mode(manifest: Manifest, host: str, target: str, host_key: str | None, verify_target: str,
+                        bootstrap: str, kexec_image: str | None, assume_yes: bool) -> int:
+    require_install_confirmation(assume_yes)
+    if not target.startswith("root@") or not verify_target or "@" not in verify_target:
+        raise Failure("specify a root@ installer --target and an explicit user@ --verify-target")
+    if bootstrap != "kexec" and kexec_image is not None:
+        raise Failure("--kexec-image is only valid with --bootstrap kexec")
+    if kexec_image is not None:
+        image = Path(kexec_image).resolve()
+        if not image.is_file() or not image.is_relative_to("/nix/store") or not str(image).endswith((".tar.gz", ".tar.xz", ".tar.zst", ".tar")):
+            raise Failure("--kexec-image must be a tarball at an immutable /nix/store path")
+    installer = os.environ.get("NSTDL_INSTALLER")
+    if not installer:
+        raise Failure("nixos-anywhere is unavailable for this flake")
+    if bootstrap == "nixos-installer":
+        require_installer(target)
+    elif is_installer(target):
+        raise Failure(f"{target} is already a NixOS installer; use --bootstrap nixos-installer")
+    with tempfile.TemporaryDirectory(prefix="nstdl-install-") as temporary:
+        staging = Path(temporary) / "extra"
+        roots = Path(temporary) / "roots"
+        staging.mkdir()
+        roots.mkdir()
+        plan = install_plan(manifest, host, host_key, staging, roots)
+        before = install_disk_facts(target, plan.devices)
+        print("Pinned nixos-anywhere does not verify SSH host keys during bootstrap, transfer or installation.", file=sys.stderr)
+        print("An unintended endpoint can receive the private host key and installation data, or have a disk formatted.", file=sys.stderr)
+        if bootstrap == "kexec":
+            if kexec_image is None:
+                print("nixos-anywhere will download its default kexec image; its contents are not pinned by this flake and the target usually needs internet access.", file=sys.stderr)
+            if input(f"Kexec {host} at {target}; this interrupts its current OS. Type 'kexec {host}' to proceed: ") != f"kexec {host}":
+                raise Failure("kexec not confirmed")
+            run([installer, "--store-paths", plan.disk_script, plan.system, "--target-host", target,
+                 "--build-on", "local", "--phases", "kexec",
+                 *(["--kexec", str(image)] if kexec_image is not None else [])], stdout=None)
+            try:
+                require_installer(target)
+            except Failure as error:
+                raise Failure("kexec returned, but the installer is unreachable or unconfirmed; no disk was formatted") from error
+            after = install_disk_facts(target, plan.devices)
+            if {name: fact[:3] for name, fact in before.items()} != {name: fact[:3] for name, fact in after.items()}:
+                print("Disk paths or sizes changed after kexec; review the mapping before continuing.", file=sys.stderr)
+        else:
+            after = before
+        require_unmounted(after)
+        require_empty_install_root(target)
+        confirm_install(host, plan.devices, f"Format disks on {target}")
+        latest = install_disk_facts(target, plan.devices)
+        require_unmounted(latest)
+        require_empty_install_root(target)
+        if latest != after:
+            raise Failure("disk facts changed after confirmation; no disk was formatted")
+        try:
+            run([installer, "--store-paths", plan.disk_script, plan.system, "--target-host", target,
+                 "--build-on", "local", "--phases", "disko,install,reboot", "--extra-files", str(staging)], stdout=None)
+        except Failure as error:
+            raise Failure("remote installation failed; disks may be partly formatted, so inspect the target before retrying") from error
+        try:
+            verify_install(verify_target, plan.public, plan.system, plan.key_path, plan.secrets, plan.mounts, staging)
+        except Failure as error:
+            raise Failure(f"installation may have completed, but postboot verification failed: {error}; do not reformat to retry verification") from error
+    return 0
+
+
+def install_local_mode(manifest: Manifest, host: str, host_key: str | None, assume_yes: bool) -> int:
+    require_install_confirmation(assume_yes)
+    if not sys.platform.startswith("linux") or os.geteuid() != 0:
+        raise Failure("install local must run as root on a NixOS installer")
+    require_installer(None)
+    nixos_install = os.environ.get("NSTDL_NIXOS_INSTALL")
+    if not nixos_install:
+        raise Failure("pinned nixos-install is unavailable for this flake")
+    with tempfile.TemporaryDirectory(prefix="nstdl-install-") as temporary:
+        staging = Path(temporary) / "extra"
+        roots = Path(temporary) / "roots"
+        staging.mkdir()
+        roots.mkdir()
+        plan = install_plan(manifest, host, host_key, staging, roots)
+        before = install_disk_facts(None, plan.devices)
+        require_unmounted(before)
+        require_empty_install_root(None)
+        confirm_install(host, plan.devices, "Format disks on this machine")
+        latest = install_disk_facts(None, plan.devices)
+        require_unmounted(latest)
+        require_empty_install_root(None)
+        if latest != before:
+            raise Failure("disk facts changed after confirmation; no disk was formatted")
+        try:
+            run([plan.disk_script], stdout=None, env={**os.environ, "DISKO_SKIP_SWAP": "1"})
+        except Failure as error:
+            raise Failure("Disko failed; disks may be partly formatted, so inspect them before retrying") from error
+        try:
+            install_shell(None, "findmnt --mountpoint /mnt >/dev/null\n")
+        except Failure as error:
+            raise Failure("Disko returned without mounting /mnt; inspect the formatted disks before retrying") from error
+        destination = Path("/mnt") / plan.key_path.lstrip("/")
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "wb") as copy, (staging / plan.key_path.lstrip("/")).open("rb") as source:
+                shutil.copyfileobj(source, copy)
+            destination.with_name(destination.name + ".pub").write_text(plan.public + "\n")
+        except OSError as error:
+            raise Failure(f"cannot place the host key in /mnt after formatting: {error.strerror}") from error
+        try:
+            run([nixos_install, "--system", plan.system, "--root", "/mnt", "--no-channel-copy", "--no-root-password"], stdout=None)
+        except Failure as error:
+            raise Failure("NixOS installation failed after formatting; inspect /mnt before retrying") from error
+        print(f"Installed {plan.system} on {', '.join(plan.devices.values())}; boot has not been verified.", file=sys.stderr)
+    return 0
 
 
 def parser(manifest: Manifest) -> argparse.ArgumentParser:
@@ -619,8 +1083,11 @@ def parser(manifest: Manifest) -> argparse.ArgumentParser:
             command.add_argument("--replace", action="store_true", help="correct an existing entered value, after typing its name to confirm")
     verbs.add_parser("rekey", help="rekey every secret for its hosts")
 
-    # A noun taking an argument rather than a verb: there is one thing to do to
-    # a host, and `nstdl deploy app-01` is the whole point of the wrapper.
+    diff_command = nouns.add_parser("diff", help="build a host and preview changes without activation")
+    diff_command.add_argument("--diff-files", action="store_true", help="also print a unified diff of /etc")
+    diff_command.add_argument("--remote-build", action="store_true", help="build on the target host")
+    diff_command.add_argument("host", metavar="HOST", help=", ".join(sorted(manifest.deploy_nodes)) or "no deployable hosts")
+
     deploy = nouns.add_parser(
         "deploy",
         help="build a host, show what changes, and activate it with deploy-rs",
@@ -650,8 +1117,21 @@ def parser(manifest: Manifest) -> argparse.ArgumentParser:
         "rest",
         nargs=argparse.REMAINDER,
         metavar="[-- DEPLOY-RS ARGUMENTS]",
-        help="passed through untouched, e.g. --dry-activate",
+        help="deploy-rs options; target, profile, SSH and extra build overrides are refused",
     )
+
+    installer = nouns.add_parser("install", help="install a declared NixOS host using Disko")
+    modes = installer.add_subparsers(dest="install_mode", required=True, metavar="LOCATION")
+    remote = modes.add_parser("remote", help="install over SSH from a controller")
+    remote.add_argument("--target", required=True, help="root@ bootstrap SSH endpoint")
+    remote.add_argument("--host-key", help="private Ed25519 key; defaults to .installer-host-keys/HOST/ssh_host_ed25519_key")
+    remote.add_argument("--verify-target", required=True, help="user@ endpoint to inspect after reboot")
+    remote.add_argument("--bootstrap", required=True, choices=("kexec", "nixos-installer"), help="current state of the remote target")
+    remote.add_argument("--kexec-image", help="optional immutable Nix store kexec tarball; otherwise nixos-anywhere downloads its default")
+    remote.add_argument("host", metavar="HOST", help="name in nixosConfigurations")
+    local = modes.add_parser("local", help="install from the NixOS installer console")
+    local.add_argument("--host-key", help="private Ed25519 key; defaults to .installer-host-keys/HOST/ssh_host_ed25519_key")
+    local.add_argument("host", metavar="HOST", help="name in nixosConfigurations")
     return root
 
 
@@ -663,6 +1143,13 @@ def main(argv: list[str]) -> int:
             raise Failure("run from the flake root (the ./nstdl wrapper does this)")
         if args.noun == "deploy":
             return deploy(manifest, args.host, args.rest, args.no_rollback, args.diff_files, args.yes)
+        if args.noun == "diff":
+            return diff(manifest, args.host, args.remote_build, args.diff_files)
+        if args.noun == "install":
+            if args.install_mode == "remote":
+                return install_remote_mode(manifest, args.host, args.target, args.host_key,
+                                           args.verify_target, args.bootstrap, args.kexec_image, args.yes)
+            return install_local_mode(manifest, args.host, args.host_key, args.yes)
         commands = Secrets(manifest, os.environ["NSTDL_AGENIX"], args.yes)
         match args.verb:
             case "status":

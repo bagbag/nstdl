@@ -6,6 +6,7 @@
   nstdlNetwork,
   nstdlSecrets,
   nstdlStorage,
+  self,
   ...
 }:
 let
@@ -558,13 +559,22 @@ in
             builtins.toJSON (nstdlSecrets.manifest // { deploy.nodes = deployNodes; })
           );
           agenix = lib.getExe config.agenix-rekey.package;
+          flakeSource = self.outPath;
           deployRs = if deployNodes == { } then null else inputs.deploy-rs.packages.${system}.default;
+          nixosAnywhere =
+            if flakeConfig.flake.nixosConfigurations == { } then null else pkgs.nixos-anywhere;
+          nixosInstall =
+            if pkgs.stdenv.hostPlatform.isLinux && flakeConfig.flake.nixosConfigurations != { } then
+              lib.getExe pkgs.nixos-install
+            else
+              null;
         };
       in
       {
         # The single entry point; agenix-rekey's own app stays unexposed
         # because its `generate` can silently regenerate existing secrets.
         packages.nstdl = nstdl;
+        packages.prepare-host-key = inputs.self.packages.${system}.prepare-host-key;
         apps.nstdl = {
           type = "app";
           program = lib.getExe nstdl;

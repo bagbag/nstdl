@@ -3,6 +3,7 @@ identity in a temporary git repository. agenix is replaced by a stub that
 records its arguments."""
 
 import base64
+import io
 import json
 import os
 import subprocess
@@ -213,6 +214,35 @@ class SecretCommandTest(unittest.TestCase):
         self.assertEqual(rotated.returncode, 1)
         for name, content in before.items():
             self.assertEqual(self.file_bytes(name), content, name)
+
+    def test_status_detects_and_sync_repairs_a_partially_published_source(self):
+        created = self.nstdl("--yes", "secret", "set", "ext-password", input="one\n")
+        self.assertEqual(created.returncode, 0, created.stderr)
+        old_hash = self.file_bytes("ext-password-hash")
+        updated = self.nstdl("--yes", "secret", "set", "--replace", "ext-password", input="two\n")
+        self.assertEqual(updated.returncode, 0, updated.stderr)
+        (self.root / "secrets/ext-password-hash.age").write_bytes(old_hash)
+
+        status = self.nstdl("secret", "status", "--check")
+        self.assertEqual(status.returncode, 3, status.stderr)
+        self.assertRegex(status.stdout, r"ext-password-hash\s+out of sync: run sync")
+
+        synced = self.nstdl("--yes", "secret", "sync")
+        self.assertEqual(synced.returncode, 0, synced.stderr)
+        self.assertIn("Repaired 1 derived hash(es).", synced.stderr)
+        self.assert_hash_of("ext-password-hash", "two")
+
+    def test_status_cannot_verify_a_derived_hash_without_an_identity(self):
+        created = self.nstdl("--yes", "secret", "set", "ext-password", input="one\n")
+        self.assertEqual(created.returncode, 0, created.stderr)
+        hidden = self.root / "identity.hidden"
+        os.rename(self.identity, hidden)
+        try:
+            status = self.nstdl("secret", "status", "--check")
+        finally:
+            os.rename(hidden, self.identity)
+        self.assertEqual(status.returncode, 3, status.stderr)
+        self.assertRegex(status.stdout, r"ext-password-hash\s+cannot verify source/hash")
 
     def test_set_replace_corrects_an_entered_value(self):
         self.nstdl("--yes", "secret", "set", "npm-token", input="npm_typo\n")
@@ -449,6 +479,25 @@ class DeployArgvTest(unittest.TestCase):
             [".#server"],
         )
 
+    def test_boot_and_test_modes_pass_through_but_target_override_does_not(self):
+        self.assertEqual(
+            self.nstdl.deploy_argv(["server"], "server", ["--boot"]),
+            [".#server", "--boot"],
+        )
+        self.assertEqual(
+            self.nstdl.deploy_argv(["server"], "server", ["--test"]),
+            [".#server", "--test"],
+        )
+        with self.assertRaisesRegex(self.nstdl.Failure, "can change the previewed target or build"):
+            self.nstdl.deploy_argv(["server"], "server", ["--hostname=other"])
+        for override in ("-f/other", "-sf/other"):
+            with self.subTest(override=override), self.assertRaisesRegex(
+                self.nstdl.Failure, "can change the previewed target or build"
+            ):
+                self.nstdl.deploy_argv(["server"], "server", [override])
+        with self.assertRaisesRegex(self.nstdl.Failure, "can change the previewed target or build"):
+            self.nstdl.deploy_argv(["server"], "server", ["--", "--impure"])
+
     def test_unknown_host_names_the_deployable_ones(self):
         with self.assertRaises(self.nstdl.Failure) as failure:
             self.nstdl.deploy_argv(["beta", "alpha"], "gamma", [])
@@ -458,6 +507,46 @@ class DeployArgvTest(unittest.TestCase):
         with self.assertRaises(self.nstdl.Failure) as failure:
             self.nstdl.deploy_argv([], "server", [])
         self.assertIn("deployment.enable", str(failure.exception))
+
+
+class InstallCommandTest(unittest.TestCase):
+    def test_install_uses_the_same_snapshot_as_its_manifest(self):
+        with mock.patch.object(nstdl, "run", return_value='{"path":"/nix/store/snapshot"}'), \
+                mock.patch.dict(os.environ, {"NSTDL_SOURCE": "/nix/store/snapshot"}):
+            self.assertEqual(
+                nstdl.install_config_ref("server"),
+                'path:/nix/store/snapshot#nixosConfigurations."server".config',
+            )
+        with mock.patch.object(nstdl, "run", return_value='{"path":"/nix/store/changed"}'), \
+                mock.patch.dict(os.environ, {"NSTDL_SOURCE": "/nix/store/snapshot"}):
+            with self.assertRaisesRegex(nstdl.Failure, "flake changed"):
+                nstdl.install_config_ref("server")
+
+    def test_install_refuses_a_changed_disk_before_formatting(self):
+        plan = nstdl.InstallPlan("server", "config", {"os": "/dev/vda"},
+                                 "/etc/ssh/host_key", "ssh-ed25519 AAAA", {}, {},
+                                 "/nix/store/disko", "/nix/store/system")
+        facts = [{"os": ("/dev/vda", 100, "disk")}, {"os": ("/dev/vda", 200, "disk")}]
+        with mock.patch("sys.stdin.isatty", return_value=True), \
+                mock.patch("builtins.input", return_value="server /dev/vda"), \
+                mock.patch.object(nstdl, "require_installer"), \
+                mock.patch.object(nstdl, "require_empty_install_root"), \
+                mock.patch.object(nstdl, "install_plan", return_value=plan), \
+                mock.patch.object(nstdl, "install_disk_facts", side_effect=facts), \
+                mock.patch.object(nstdl, "verify_install"), \
+                mock.patch.object(nstdl, "run") as run, \
+                mock.patch.dict(os.environ, {"NSTDL_INSTALLER": "/nix/store/installer"}):
+            with self.assertRaisesRegex(nstdl.Failure, "disk facts changed after confirmation"):
+                nstdl.install_remote_mode(mock.Mock(items={}), "server", "root@installer",
+                                          "/key", "admin@installed", "nixos-installer", None, False)
+            run.assert_not_called()
+
+    def test_install_refuses_yes_before_evaluating_a_host(self):
+        with mock.patch.object(nstdl, "install_plan") as prepare:
+            with self.assertRaisesRegex(nstdl.Failure, "typed host/device confirmation"):
+                nstdl.install_remote_mode(mock.Mock(items={}), "server", "root@rescue",
+                                          "/key", "root@installed", "nixos-installer", None, True)
+            prepare.assert_not_called()
 
 
 class RebuiltTest(unittest.TestCase):
@@ -508,8 +597,9 @@ esac""",
             "nom": f'echo nom >> {self.calls}; cat > /dev/null',
             "ssh": f"""echo "ssh $*" >> {self.calls}
 case "$*" in
+  *readlink*-f*/run/current-system) echo /nix/store/old-system ;;
   *diff-closures*) echo "hello: 1.0 → 1.1" ;;
-  *path-info*/run/current-system) echo /nix/store/aaa-etc /nix/store/bbb-hello-1.0 ;;
+  *path-info*/nix/store/old-system) echo /nix/store/aaa-etc /nix/store/bbb-hello-1.0 ;;
   *path-info*) echo /nix/store/ccc-etc /nix/store/ddd-hello-1.1 ;;
   *dry-activate) echo "would restart the following units: nginx.service" ;;
   *multi-user.target.wants) echo "app.service nginx.service" ;;
@@ -552,9 +642,11 @@ esac""",
     def test_the_separator_is_optional(self):
         self.assertEqual(self.deploy("server", "--", "--dry-activate"), [".#server", "--dry-activate"])
 
-    def test_deploy_rs_own_separator_survives(self):
-        # deploy-rs hands everything after its `--` to `nix build`.
-        self.assertEqual(self.deploy("server", "--", "--", "--impure"), [".#server", "--", "--impure"])
+    def test_deploy_rs_build_arguments_are_refused(self):
+        run = self.invoke("server", "--", "--", "--impure")
+        self.assertEqual(run.returncode, 1)
+        self.assertIn("can change the previewed target or build", run.stderr)
+        self.assertFalse(self.log.exists())
 
     def test_no_rollback_disables_both_rollbacks(self):
         self.assertEqual(
@@ -579,9 +671,14 @@ esac""",
             [
                 "nix build --no-link --print-out-paths .#nixosConfigurations.server.config.system.build.toplevel --log-format internal-json -v",
                 "nix copy --substitute-on-destination --to ssh://admin@server.example /nix/store/new-system",
-                "ssh admin@server.example nix --extra-experimental-features nix-command store diff-closures /run/current-system /nix/store/new-system",
-                "ssh admin@server.example nix --extra-experimental-features nix-command path-info --recursive /run/current-system",
+                "ssh admin@server.example readlink -f /run/current-system",
+                "ssh admin@server.example nix --extra-experimental-features nix-command store diff-closures /nix/store/old-system /nix/store/new-system",
+                "ssh admin@server.example nix --extra-experimental-features nix-command path-info --recursive /nix/store/old-system",
                 "ssh admin@server.example nix --extra-experimental-features nix-command path-info --recursive /nix/store/new-system",
+                "ssh admin@server.example sh -s",
+                "ssh admin@server.example sh -s",
+                "ssh admin@server.example sh -s",
+                "ssh admin@server.example sh -s",
                 "ssh admin@server.example sudo /nix/store/new-system/bin/switch-to-configuration dry-activate",
                 "ssh admin@server.example ls /nix/store/new-system/etc/systemd/system/multi-user.target.wants",
                 "ssh admin@server.example systemctl show -p Id,LoadState,ActiveState,ConditionResult app.service nginx.service",
@@ -590,14 +687,28 @@ esac""",
         self.assertIn("would start again (wanted by multi-user.target, not running): app.service", run.stderr)
         self.assertIn("hello: 1.0 → 1.1", run.stderr)
         self.assertIn("Rebuilt (1):\n  etc\n", run.stderr)
+        self.assertIn("System PATH commands: -(none); +(none)", run.stderr)
         self.assertIn("would restart the following units: nginx.service", run.stderr)
         self.assertNotIn("-listen 80", run.stderr)
 
     def test_diff_files_diffs_etc(self):
         run = self.invoke("--diff-files", "server")
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertIn("ssh admin@server.example diff -ru /run/current-system/etc /nix/store/new-system/etc", self.calls.read_text())
+        self.assertIn("ssh admin@server.example diff -ru /nix/store/old-system/etc /nix/store/new-system/etc", self.calls.read_text())
         self.assertIn("-listen 80", run.stderr)
+
+    def test_diff_previews_without_deploying(self):
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "diff", "server"],
+            cwd=self.root,
+            env=self.environment,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Packages:", result.stderr)
+        self.assertFalse(self.log.exists())
 
     def test_a_failed_unit_preview_still_asks(self):
         stub = self.root / "bin" / "ssh"
@@ -627,6 +738,64 @@ esac""",
         self.assertEqual(run.returncode, 1)
         self.assertIn("--yes", run.stderr)
         self.assertFalse(self.calls.exists())
+
+
+class DiffInventoryTest(unittest.TestCase):
+    def test_command_collection_rejects_partial_find_output(self):
+        with tempfile.TemporaryDirectory() as root:
+            first = Path(root) / "first"
+            second = Path(root) / "second"
+            first.mkdir()
+            second.mkdir()
+
+            def run_shell(_argv, *, input):
+                find_stub = f'''find() {{
+  case "$2" in
+    {first}) return 7 ;;
+    {second}) printf 'remaining-tool\\n' ;;
+  esac
+}}
+'''
+                result = subprocess.run(["sh", "-s"], input=find_stub + input, capture_output=True, text=True)
+                if result.returncode:
+                    raise nstdl.Failure("collector failed")
+                return result.stdout
+
+            with mock.patch.object(nstdl, "run", side_effect=run_shell):
+                with self.assertRaises(nstdl.Failure):
+                    nstdl.commands("host", [str(first), str(second)])
+
+    def test_home_generation_uses_user_field_not_escaped_unit_name(self):
+        generation = f"/nix/store/{'a' * 32}-home-manager-generation"
+        output = f"home-manager-alice\\x2dops.service\talice-ops\t/nix/store/setup-env {generation}\n"
+        with mock.patch.object(nstdl, "remote_script", return_value=output):
+            self.assertEqual(nstdl.home_generations("host", "/run/current-system"), {"alice-ops": generation})
+
+    def test_unparseable_home_unit_is_reported(self):
+        with mock.patch.object(nstdl, "remote_script", return_value="home-manager-admin.service\tadmin\t/no-generation\n"):
+            with self.assertRaises(nstdl.Failure):
+                nstdl.home_generations("host", "/run/current-system")
+
+    def test_system_command_removal_is_visible_even_when_home_keeps_it(self):
+        generation = f"/nix/store/{'a' * 32}-home-manager-generation"
+        def fake_run(argv, **_kwargs):
+            if "readlink" in argv:
+                return "/nix/store/old-system\n" if "/run/current-system" in argv else "/nix/store/home-path\n"
+            return ""
+
+        def fake_commands(_target, paths):
+            if len(paths) == 1:
+                return {"tool"} if paths[0].startswith("/nix/store/old-system") else set()
+            return {"tool"}
+
+        with mock.patch.object(nstdl, "run", side_effect=fake_run), \
+             mock.patch.object(nstdl, "home_generations", return_value={"admin": generation}), \
+             mock.patch.object(nstdl, "commands", side_effect=fake_commands), \
+             mock.patch.object(nstdl.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), \
+             mock.patch.object(sys, "stderr", new_callable=io.StringIO) as stderr:
+            nstdl.show_diff("host", "server", "/nix/store/system", False)
+        self.assertIn("System PATH commands: -tool; +(none)", stderr.getvalue())
+        self.assertIn("admin: -(none); +(none)", stderr.getvalue())
 
 
 if __name__ == "__main__":

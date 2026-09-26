@@ -148,25 +148,132 @@ Deploy through the same wrapper the secrets use:
 
 ```console
 ./nstdl deploy app-01                     # build, show the diff, ask, activate
+./nstdl diff app-01                       # same preview without activation
+./nstdl diff --remote-build app-01        # build on the host, then preview
 ./nstdl deploy --no-rollback app-01       # keep the generation even if activation fails
 ./nstdl deploy --diff-files app-01        # also a unified diff of /etc
-./nstdl deploy app-01 -- --dry-activate   # anything after the host is deploy-rs'
+./nstdl deploy app-01 -- --remote-build   # build on the host before activation
+./nstdl deploy app-01 -- --boot           # update next boot, no activation now
+./nstdl deploy app-01 -- --test           # activate without updating boot loader
 ```
 
-Before activating, it builds the system with `nom` output (on the host under
+`diff` and `deploy` share the same preview. Before activating, `deploy` builds
+the system with `nom` output (on the host under
 `--remote-build`), copies it and shows, against the host's running system: the
 package diff (`nix store diff-closures`), the store paths rebuilt under an
-existing name (configuration files and units included), and the units the
+existing name (configuration files and units included), declared executable names
+added to or removed from the system and Home Manager paths, Home Manager package and managed
+file changes for users with a system service, and the units the
 switch would stop, start, restart or reload (`switch-to-configuration
 dry-activate` under `sudo`, which may ask for the password), plus the units
 `multi-user.target` wants that are not running: the switch restarts that
 target, which starts them again — a service stopped by hand included. Then it asks;
 `--yes` skips the question. `--no-rollback` disables both deploy-rs rollbacks: meant for a failure a
 reboot clears, it also keeps a generation that locks you out. nstdl options go
-before the host.
+before the host. The preview is advisory: deploy-rs evaluates again after approval,
+so a concurrent flake change can change the deployed closure. Useful deploy-rs
+activation modes such as `--boot`, `--test`, and `--dry-activate` are passed
+through; nstdl labels the selected mode, and `--boot` skips the unit activation
+preview. Target, profile, SSH, and extra build overrides are refused because
+they would make the approved preview describe a different operation. Use
+deploy-rs directly when those overrides are needed.
 
 It runs the deploy-rs this flake locks, matching the `activate-rs` in the
 profile. A host whose secrets are missing or not rekeyed fails at evaluation.
+
+## Consumer layout
+
+Keep shared login keys in `accounts.nix`, the secret inventory in
+`secrets/default.nix`, and each complete host declaration in
+`hosts/HOST/default.nix`. Put `secrets.hostPubkey` in that host declaration.
+Import these modules explicitly from the consumer's `flake.nix`:
+
+```nix
+imports = [
+  inputs.nstdl.flakeModules.default
+  ./accounts.nix
+  ./secrets/default.nix
+  ./hosts/app-01/default.nix
+];
+```
+
+nstdl does not scan directories for modules. Add each new host import and
+include the files in the Git flake source. Keep canonical and rekeyed `.age`
+files under `secrets/`; ignore `/.installer-host-keys/` at the repository root.
+That local directory holds the installer-side private host key and its `.pub`
+sibling until installation is verified or the operator removes them.
+
+## Installation
+
+`nstdl install` installs an already declared NixOS configuration using its
+Disko layout. Prepare and review hardware, networking, runtime secret recipient
+and ciphertext before invoking it. For a fresh installed Ed25519 SSH host key,
+run this from the consumer flake root:
+
+```console
+./nstdl prepare-host-key app-01
+```
+
+The command creates `.installer-host-keys/app-01/ssh_host_ed25519_key` and its
+`.pub` sibling in a Git-ignored directory. It refuses an existing directory
+and prints the fingerprint and a `secrets.hostPubkey` assignment to paste into
+`hosts/app-01/default.nix`. If needed, it creates
+`.installer-host-keys/.gitignore`; include that ignore file in Git, but never
+include the key directory. The preparation package is separate from the
+secret-dependent nstdl CLI, so it can run before the new host recipient is
+declared. Include the host declaration in the consumer Git flake before using
+it. Once all canonical secret values exist, run `./nstdl secret rekey`, then
+`./nstdl secret status --check`. Use `secret set` or `secret sync` first if
+values are missing. Rekeying updates encrypted host files and may stage them
+in Git. Keep the private key available for retries; a reinstall retaining the
+declared recipient needs the same key, recovered from the host or a backup if
+the local copy has been removed. Losing it before installation requires an
+explicit new identity, declaration update and rekey before retrying.
+
+Run either remote form from a controller; use `nixos-installer` when the target
+already booted a NixOS ISO:
+
+```console
+./nstdl install remote --bootstrap kexec --target root@rescue \
+  --verify-target admin@installed app-01
+./nstdl install remote --bootstrap nixos-installer --target root@installer \
+  --verify-target admin@installed app-01
+./nstdl install local app-01
+```
+
+Run `local` as root on the NixOS ISO console with the consumer flake and key
+available there. It needs a Linux build or cached closures and evaluation
+inputs; a standard ISO is not automatically prepared for offline use. All forms
+default to `.installer-host-keys/HOST/ssh_host_ed25519_key`; use `--host-key PATH`
+when recovering an existing identity from elsewhere. They require a terminal,
+build the exact Disko script and system before formatting,
+print the selected disks, and require a typed confirmation. The kexec form also
+confirms the OS transition and rechecks the disks in the installer. Remote
+installation uses nixos-anywhere to transfer the built outputs, format, install
+and reboot. It then checks the installed SSH host key, running closure,
+declared mount presence, concrete filesystem types and age secret metadata.
+Local installation runs the same Disko script and exact system through pinned
+`nixos-install`; its success means installation completed on disk, **not** that
+the new system booted.
+Neither result establishes application readiness.
+
+Without `--kexec-image`, pinned nixos-anywhere downloads its default image,
+normally on the target. That image is selected by a versioned upstream URL but
+its contents are not pinned by this flake; the target normally needs internet
+access. Supply `--kexec-image /nix/store/HASH-kexec.tar.gz` for a pre-acquired
+image. Either image must preserve a way for the operator to connect over SSH
+after the transition; nstdl checks that connection before formatting.
+If an install fails after formatting starts, inspect the target and its mounted
+root before retrying. A failed postboot check does not call for another format.
+
+Pinned nixos-anywhere disables SSH host-key checking for its installer and Nix
+transfer connections. A wrong endpoint or active intermediary can receive the
+private installed host key and installation data, or have a disk formatted. The
+postboot SSH key check cannot retroactively authenticate those connections.
+`--yes` is unavailable for installation. The install command does not create
+hardware configuration, generate identities, rekey secrets, or restore data.
+It supports `disko.rootMountPoint = "/mnt"`; other mount roots are refused
+before formatting.
 
 ## Secrets
 
@@ -228,16 +335,25 @@ Commit this wrapper there as an executable `nstdl`:
 
 ```sh
 #!/usr/bin/env bash
-cd "$(dirname "$0")" && exec nix run .#nstdl -- "$@"
+set -euo pipefail
+cd "$(dirname "$0")"
+if [[ ${1-} == prepare-host-key ]]; then
+  shift
+  exec nix run .#prepare-host-key -- "$@"
+fi
+exec nix run .#nstdl -- "$@"
 ```
 
 Never switch it to a `path:` reference: that copies ignored files into the
 world-readable store.
 
 - `./nstdl secret status [--check]` lists every declared secret, missing values
-  and pending rekeys; `--check` exits 3 on drift and is the only command CI may
-  run.
-- `./nstdl secret sync` creates every missing generated value, then rekeys. Run
+  and pending rekeys, and verifies derived hashes against their source when an
+  administrator identity is available. An unavailable identity reports the pair
+  as unverifiable rather than healthy; `--check` exits 3 on drift and is the only
+  command CI may run.
+- `./nstdl secret sync` creates missing generated values, repairs a derived hash
+  that no longer matches its source, then rekeys. Run
   it after any change to the declarations, including a newly granted host.
 - `./nstdl secret set ITEM` stores the first value of an externally issued
   secret (prompted, or from stdin) or, for a `password-hash` without `from`,

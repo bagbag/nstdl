@@ -12,9 +12,14 @@
   xkcdpass,
   manifest,
   agenix,
+  flakeSource,
   # Null for a consumer that declares no deployable host, so a secrets-only
   # flake never pulls deploy-rs into its wrapper for a verb it cannot run.
   deployRs,
+  # Null when the consumer has no NixOS configuration.
+  nixosAnywhere,
+  # Null on Darwin; local installation runs on a Linux NixOS installer.
+  nixosInstall,
 }:
 let
   tools = [
@@ -51,5 +56,8 @@ runCommand "nstdl"
       --prefix PATH : ${lib.makeBinPath tools} \
       --set NSTDL_MANIFEST ${manifest} \
       --set NSTDL_AGENIX ${agenix} \
-      ${lib.optionalString (deployRs != null) "--set NSTDL_DEPLOY ${lib.getExe deployRs}"}
+      --set NSTDL_SOURCE ${flakeSource} \
+      ${lib.optionalString (deployRs != null) "--set NSTDL_DEPLOY ${lib.getExe deployRs}"} \
+      ${lib.optionalString (nixosAnywhere != null) "--set NSTDL_INSTALLER ${lib.getExe nixosAnywhere}"} \
+      ${lib.optionalString (nixosInstall != null) "--set NSTDL_NIXOS_INSTALL ${nixosInstall}"}
   ''

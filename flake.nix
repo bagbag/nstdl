@@ -88,6 +88,22 @@
       # storage. A plain path, so it already dedupes like any other module.
       nixosModules.garage = ./modules/nixos/features/garage.nix;
 
+      # Key preparation must also work before a secrets-enabled consumer flake
+      # has a declared recipient and can evaluate its own nstdl package.
+      packages = lib.genAttrs [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ] (
+        system:
+        let
+          pkgs = inputs.nixpkgs.legacyPackages.${system};
+        in
+        {
+          prepare-host-key = pkgs.writeShellApplication {
+            name = "prepare-host-key";
+            runtimeInputs = [ pkgs.coreutils pkgs.git pkgs.openssh ];
+            text = builtins.readFile ./packages/prepare-host-key.sh;
+          };
+        }
+      );
+
       checks = lib.genAttrs [ "x86_64-linux" "aarch64-linux" ] (system: {
         garage = import ./tests/garage.nix {
           pkgs = inputs.nixpkgs.legacyPackages.${system};
