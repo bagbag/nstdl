@@ -367,23 +367,29 @@ exec nix run .#nstdl -- "$@"
 Never switch it to a `path:` reference: that copies ignored files into the
 world-readable store.
 
-- `./nstdl secret status [--check]` lists every declared secret, missing values
-  and pending rekeys, and verifies derived hashes against their source when an
+- `./nstdl secret status [--check]` lists every declared secret, missing values,
+  values not yet encrypted to the current administrators, and pending rekeys, and verifies derived hashes against their source when an
   administrator identity is available. An unavailable identity reports the pair
   as unverifiable rather than healthy; `--check` exits 3 on drift and is the only
   command CI may run.
 - `./nstdl secret sync` creates missing generated values, repairs a derived hash
-  that no longer matches its source, then rekeys. Run
-  it after any change to the declarations, including a newly granted host.
+  that no longer matches its source, re-encrypts existing values whose
+  recipients differ from the declared administrators (keeping each value), then
+  rekeys. Run it after any change to the declarations, including a newly
+  granted host or administrator key; re-encryption needs a key the values are
+  already encrypted to. SSH keys are recognised exactly; `age1` recipients
+  carry no identifying tag, so only a changed count of them is detected.
+  Removing an administrator does not revoke what they could read: git history
+  keeps the old files, so replace those values.
 - `./nstdl secret set ITEM` stores the first value of an externally issued
   secret (prompted, or from stdin) or, for a `password-hash` without `from`,
   hashes a self-chosen password. A hash derived from an entered value is
-  created by setting that value. `set --replace ITEM` corrects an entered
-  value after you type its name, regardless of `rotate`.
-- `./nstdl secret rotate ITEM` replaces a value: it generates a new one, or
-  asks for it (prompt or stdin) when the value is entered. It asks you to type
-  the name first, unless `--yes` is given, and re-derives the hashes computed
-  from it.
+  created by setting that value. `set --replace ITEM` replaces an entered
+  value, whether it was mistyped or its issuer changed it. An entered value is
+  typed twice at a prompt, or read once from stdin.
+- `./nstdl secret rotate ITEM` replaces a generated value with a new one, for
+  an item declaring `rotate = true`. It asks you to type the name first,
+  unless `--yes` is given, and re-derives the hashes computed from it.
 - `./nstdl secret edit ITEM` changes an externally issued value in `$EDITOR`.
   The value is written verbatim to a private file for the editor, which is
   memory-backed on Linux and in `$TMPDIR` on macOS, and removed afterwards.
@@ -400,10 +406,10 @@ alphanumeric-lowercase sized by `length` in characters, at least 80 bits,
 default 20),
 `passphrase`
 (`words` from the EFF long list, space-separated) and `password-hash` (yescrypt,
-from another secret or prompted). A value is created once and never replaced
-unless its item sets `rotate = true` (`rotate`, `edit`) or it is an entered
-value corrected with `set --replace`; keep `rotate` false for keys whose change
-breaks existing data. Derived hashes follow their source whenever it changes.
+from another secret or prompted). A generated value is created once and never
+replaced unless its item sets `rotate = true`; keep it false for keys whose
+change breaks existing data. An entered value follows its issuer, so it is
+always replaceable with `set --replace` or `edit`, and cannot set `rotate`. Derived hashes follow their source whenever it changes.
 New files are added to git, and every changing command ends with a rekey —
 deferred, naming what is missing, while a host-granted secret has no value,
 because agenix-rekey refuses to run until all exist. Use `nstdl secret`

@@ -62,11 +62,11 @@ class SecretCommandTest(unittest.TestCase):
                     hosts=[host],
                 ),
                 "npm-token": item("secrets/npm-token.age", hosts=[host]),
-                "api-token": item("secrets/api-token.age", rotate=True),
+                "api-token": item("secrets/api-token.age"),
                 "chosen-password-hash": item(
                     "secrets/chosen-password-hash.age", {**random, "type": "password-hash"}
                 ),
-                "ext-password": item("secrets/ext-password.age", rotate=True),
+                "ext-password": item("secrets/ext-password.age"),
                 "ext-password-hash": item(
                     "secrets/ext-password-hash.age", {**random, "type": "password-hash", "from": "ext-password"}
                 ),
@@ -190,12 +190,12 @@ class SecretCommandTest(unittest.TestCase):
         self.assertEqual(self.nstdl("--yes", "secret", "set", "ext-password", input="one\n").returncode, 0)
         self.assert_hash_of("ext-password-hash", "one")
 
-    def test_rotate_derives_hashes_from_the_new_value_without_an_identity(self):
+    def test_replacing_derives_hashes_from_the_new_value_without_an_identity(self):
         self.nstdl("--yes", "secret", "set", "ext-password", input="one\n")
         hidden = self.root / "identity.hidden"
         os.rename(self.identity, hidden)
         try:
-            rotated = self.nstdl("--yes", "secret", "rotate", "ext-password", input="two\n")
+            rotated = self.nstdl("--yes", "secret", "set", "--replace", "ext-password", input="two\n")
         finally:
             os.rename(hidden, self.identity)
         self.assertEqual(rotated.returncode, 0, rotated.stderr)
@@ -210,7 +210,7 @@ class SecretCommandTest(unittest.TestCase):
         (stubs / "mkpasswd").write_text("#!/bin/sh\nexit 1\n")
         (stubs / "mkpasswd").chmod(0o755)
         self.environment["PATH"] = f"{stubs}:{os.environ['PATH']}"
-        rotated = self.nstdl("--yes", "secret", "rotate", "ext-password", input="two\n")
+        rotated = self.nstdl("--yes", "secret", "set", "--replace", "ext-password", input="two\n")
         self.assertEqual(rotated.returncode, 1)
         for name, content in before.items():
             self.assertEqual(self.file_bytes(name), content, name)
@@ -243,6 +243,78 @@ class SecretCommandTest(unittest.TestCase):
             os.rename(hidden, self.identity)
         self.assertEqual(status.returncode, 3, status.stderr)
         self.assertRegex(status.stdout, r"ext-password-hash\s+cannot verify source/hash")
+
+    def second_administrator(self):
+        """An SSH key, as administrators use: its stanza names it, where an
+        X25519 stanza would only count."""
+        identity = self.root / "id_ed25519"
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(identity)], check=True)
+        return str(identity), " ".join(Path(f"{identity}.pub").read_text().split()[:2])
+
+    def change_manifest(self, **fields):
+        self.manifest.write_text(json.dumps({**json.loads(self.manifest.read_text()), **fields}))
+
+    def test_status_detects_and_sync_reencrypts_for_changed_administrators(self):
+        self.nstdl("--yes", "secret", "sync")
+        self.nstdl("--yes", "secret", "set", "npm-token", input="npm_abc\n")
+        names = ("key", "token", "admin-password", "admin-password-hash", "npm-token")
+        values = {name: self.decrypt(name) for name in names}
+        identity, recipient = self.second_administrator()
+        first = json.loads(self.manifest.read_text())["recipients"][0]
+        self.change_manifest(recipients=[first, recipient])
+
+        status = self.nstdl("secret", "status", "--check")
+        self.assertEqual(status.returncode, 3, status.stderr)
+        for name in names:
+            self.assertRegex(status.stdout, rf"{name}\s+recipients changed: run sync")
+
+        synced = self.nstdl("--yes", "secret", "sync")
+        self.assertEqual(synced.returncode, 0, synced.stderr)
+        self.assertIn("Re-encrypted 5 secret(s)", synced.stderr)
+        for name, value in values.items():
+            self.assertEqual(self.decrypt(name), value, name)
+            second = subprocess.run(
+                ["rage", "-d", "-i", identity, str(self.root / "secrets" / f"{name}.age")],
+                check=True, capture_output=True, text=True,
+            ).stdout
+            self.assertEqual(second, value, name)
+        self.assertNotIn("recipients changed", self.nstdl("secret", "status").stdout)
+
+        # Dropping a key is a change too.
+        self.change_manifest(recipients=[recipient], identities=[identity])
+        self.assertRegex(self.nstdl("secret", "status").stdout, r"key\s+recipients changed: run sync")
+        self.assertEqual(self.nstdl("--yes", "secret", "sync").returncode, 0)
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.decrypt("key")
+
+    def test_sync_cannot_reencrypt_without_a_key_it_is_encrypted_to(self):
+        self.nstdl("--yes", "secret", "sync")
+        before = {path.name: path.read_bytes() for path in (self.root / "secrets").glob("*.age")}
+        identity, recipient = self.second_administrator()
+        self.change_manifest(recipients=[recipient], identities=[identity])
+
+        synced = self.nstdl("--yes", "secret", "sync")
+        self.assertEqual(synced.returncode, 1)
+        self.assertIn("no identity here can decrypt it", synced.stderr)
+        after = {path.name: path.read_bytes() for path in (self.root / "secrets").glob("*.age")}
+        self.assertEqual(after, before)
+
+    def test_an_interactive_value_is_entered_twice(self):
+        previous = os.getcwd()
+        os.chdir(self.root)
+        try:
+            commands = nstdl.Secrets(nstdl.Manifest(str(self.manifest)), self.environment["NSTDL_AGENIX"], assume_yes=False)
+            item = commands.manifest.items["api-token"]
+            with mock.patch("sys.stdin.isatty", return_value=True), \
+                    mock.patch("builtins.input") as confirm, \
+                    mock.patch("getpass.getpass", side_effect=["first", "first", "second", "second"]):
+                commands.set(item)
+                commands.set(item, replace=True)
+            # Typing the value twice is the confirmation; no name is asked.
+            confirm.assert_not_called()
+        finally:
+            os.chdir(previous)
+        self.assertEqual(self.decrypt("api-token"), "second")
 
     def test_set_replace_corrects_an_entered_value(self):
         self.nstdl("--yes", "secret", "set", "npm-token", input="npm_typo\n")
@@ -279,16 +351,13 @@ class SecretCommandTest(unittest.TestCase):
         self.assertEqual(generated.returncode, 1)
         self.assertIn("is generated", generated.stderr)
 
-    def test_rotate_replaces_an_entered_value(self):
+    def test_rotate_leaves_an_entered_value_to_set_replace(self):
         self.nstdl("--yes", "secret", "set", "npm-token", input="npm_abc\n")
+        before = self.file_bytes("npm-token")
         refused = self.nstdl("--yes", "secret", "rotate", "npm-token", input="npm_new\n")
         self.assertEqual(refused.returncode, 1)
-        self.assertIn("does not allow rotation", refused.stderr)
-
-        self.nstdl("--yes", "secret", "set", "api-token", input="first\n")
-        rotated = self.nstdl("--yes", "secret", "rotate", "api-token", input="second\n")
-        self.assertEqual(rotated.returncode, 0, rotated.stderr)
-        self.assertEqual(self.decrypt("api-token"), "second")
+        self.assertIn("replace it with set --replace", refused.stderr)
+        self.assertEqual(self.file_bytes("npm-token"), before)
 
     def edit(self, name, editor_script):
         """Runs `edit` in-process as if from a terminal, with a stub editor."""
@@ -335,10 +404,11 @@ class SecretCommandTest(unittest.TestCase):
         self.assertEqual(self.file_bytes("api-token"), before)
         self.assertFalse(self.agenix_log.exists())
 
-    def test_edit_refuses_values_that_must_not_change(self):
-        self.nstdl("--yes", "secret", "set", "npm-token", input="npm_abc\n")
-        with self.assertRaisesRegex(nstdl.Failure, "does not allow replacing"):
-            self.edit("npm-token", "true")
+    def test_edit_refuses_generated_values_and_needs_a_terminal(self):
+        self.nstdl("--yes", "secret", "sync")
+        with self.assertRaisesRegex(nstdl.Failure, "is generated; use rotate"):
+            self.edit("token", "true")
+        self.nstdl("--yes", "secret", "set", "api-token", input="first\n")
         piped = self.nstdl("--yes", "secret", "edit", "api-token")
         self.assertEqual(piped.returncode, 1)
         self.assertIn("edit needs a terminal", piped.stderr)
@@ -366,7 +436,8 @@ class SecretCommandTest(unittest.TestCase):
 
 
 class RotateConfirmationTest(unittest.TestCase):
-    """The typed-name confirmation, which only an interactive session sees."""
+    """What an interactive replacement asks: a generated value its name, an
+    entered value the new value twice."""
 
     def setUp(self):
         self.nstdl = nstdl
@@ -376,19 +447,30 @@ class RotateConfirmationTest(unittest.TestCase):
         manifest = Path(self.directory.name) / "manifest.json"
         manifest.write_text(json.dumps({"recipients": [], "identities": [], "items": {}, "deploy": {"nodes": []}}))
         self.secrets = nstdl.Secrets(nstdl.Manifest(str(manifest)), "true", assume_yes=False)
-        self.item = nstdl.Item("token", self.file, rotate=True, generator=None, hosts=[])
+        self.item = nstdl.Item("token", self.file, rotate=False, generator=None, hosts=[])
 
     def tearDown(self):
         self.directory.cleanup()
 
-    def test_a_wrong_name_cancels_before_anything_is_asked_or_written(self):
-        for command in (self.secrets.rotate, lambda item: self.secrets.set(item, replace=True)):
+    def test_a_wrong_name_cancels_a_generated_rotation_before_anything_is_written(self):
+        random = {"type": "random", "format": "hex", "bytes": 32, "length": None, "words": 6, "from": None}
+        generated = nstdl.Item("token", self.file, rotate=True, generator=random, hosts=[])
+        with mock.patch("sys.stdin.isatty", return_value=True), \
+                mock.patch("builtins.input", return_value="tokn"), \
+                mock.patch.object(self.secrets, "generate") as generate:
+            with self.assertRaisesRegex(self.nstdl.Failure, "not confirmed"):
+                self.secrets.rotate(generated)
+        generate.assert_not_called()
+        self.assertEqual(self.file.read_bytes(), b"existing")
+
+    def test_a_mismatched_or_empty_entry_cancels_before_anything_is_written(self):
+        for entries in (["new", "nwe"], ["", ""]):
             with mock.patch("sys.stdin.isatty", return_value=True), \
-                    mock.patch("builtins.input", return_value="tokn"), \
-                    mock.patch("getpass.getpass") as getpass:
-                with self.assertRaisesRegex(self.nstdl.Failure, "not confirmed"):
-                    command(self.item)
-            getpass.assert_not_called()
+                    mock.patch("builtins.input") as confirm, \
+                    mock.patch("getpass.getpass", side_effect=entries):
+                with self.assertRaisesRegex(self.nstdl.Failure, "empty or do not match"):
+                    self.secrets.set(self.item, replace=True)
+            confirm.assert_not_called()
             self.assertEqual(self.file.read_bytes(), b"existing")
 
 
@@ -464,6 +546,40 @@ class StoreTest(unittest.TestCase):
             self.secrets.store(self.item, "value", replace=False)
         self.assertEqual(self.item.file.read_bytes(), b"existing")
         self.assertEqual(sorted(os.listdir(self.root)), ["identity.txt", "manifest.json", "x.age"])
+
+
+class HeaderTest(unittest.TestCase):
+    """Recipients read from an age header, which needs no identity."""
+
+    # A throwaway key: only its public half is used, to encrypt.
+    SSH = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPreoKvy4sUQE3UIOa5JjWqpDa2PE7DXSWWKwCcCgPcl"
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        identity = Path(self.directory.name) / "identity.txt"
+        subprocess.run(["rage-keygen", "-o", str(identity)], check=True, stderr=subprocess.DEVNULL)
+        self.age = subprocess.run(
+            ["rage-keygen", "-y", str(identity)], check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def encrypt(self, *options):
+        return subprocess.run(
+            ["rage", "-e", *options, "-r", self.SSH, "-r", self.age], input=b"value", check=True, capture_output=True
+        ).stdout
+
+    def test_ssh_tags_and_x25519_stanzas_match_their_recipients(self):
+        expected = sorted([nstdl.recipient_stanza(self.SSH), nstdl.recipient_stanza(self.age)], key=str)
+        self.assertEqual(nstdl.recipient_stanza(self.SSH + " comment"), nstdl.recipient_stanza(self.SSH))
+        for options in ([], ["-a"]):
+            stanzas = nstdl.header_stanzas(self.encrypt(*options))
+            self.assertEqual(sorted(stanzas, key=str), expected, options)
+
+    def test_a_file_that_is_not_age_is_refused(self):
+        with self.assertRaisesRegex(nstdl.Failure, "not an age file"):
+            nstdl.header_stanzas(b"existing")
 
 
 class DeployArgvTest(unittest.TestCase):

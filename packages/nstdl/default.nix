@@ -9,6 +9,7 @@
   mkpasswd,
   nix-output-monitor,
   nvd,
+  openssh,
   rage,
   xkcdpass,
   manifest,
@@ -40,7 +41,11 @@ runCommand "nstdl"
     passthru.tests.unit =
       runCommand "nstdl-unit-tests"
         {
-          nativeBuildInputs = [ python3 ] ++ tools;
+          nativeBuildInputs = [
+            python3
+            openssh
+          ]
+          ++ tools;
         }
         ''
           export HOME="$TMPDIR"
@@ -60,6 +65,8 @@ runCommand "nstdl"
       --set NSTDL_SOURCE ${flakeSource} \
       --set NSTDL_NVD ${lib.getExe nvd} \
       ${lib.optionalString (deployRs != null) "--set NSTDL_DEPLOY ${lib.getExe deployRs}"} \
-      ${lib.optionalString (nixosAnywhere != null) "--set NSTDL_INSTALLER ${lib.getExe nixosAnywhere}"} \
+      ${
+        lib.optionalString (nixosAnywhere != null) "--set NSTDL_INSTALLER ${lib.getExe nixosAnywhere}"
+      } \
       ${lib.optionalString (nixosInstall != null) "--set NSTDL_NIXOS_INSTALL ${nixosInstall}"}
   ''

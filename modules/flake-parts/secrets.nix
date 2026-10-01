@@ -158,6 +158,9 @@ let
           ++ lib.optional (from != null && item.rotate)
             "nstdl secret '${name}': a derived secret cannot set rotate; it follows its source '${from}'"
           ++ lib.optional (
+            item.rotate && (generator == null || generator.type == "password-hash" && from == null)
+          ) "nstdl secret '${name}': an entered secret cannot set rotate; replace it with `nstdl secret set --replace`"
+          ++ lib.optional (
             generator != null
             && generator.type == "random"
             && randomFormats.${generator.format}.sizing == "bytes"
@@ -407,7 +410,7 @@ in
             rotate = mkOption {
               type = types.bool;
               default = false;
-              description = "Whether an existing value may ever be replaced (`rotate`, `edit`). Keep false for values whose change breaks existing data, such as encryption keys.";
+              description = "Whether `nstdl secret rotate` may replace a generated value. Keep false for values whose change breaks existing data, such as encryption keys. Entered values follow their issuer and are replaced with `set --replace` or `edit`, so they cannot set it.";
             };
             access = mkOption {
               type = types.attrsOf (

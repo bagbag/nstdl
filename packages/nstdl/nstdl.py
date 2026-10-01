@@ -9,9 +9,11 @@ a deployable host. `nix`, `ssh` and `nom` come from PATH.
 Secret values live only in memory and on the stdin of child processes. They
 are never passed as arguments and never written unencrypted, except to the
 private file `edit` hands to the editor. An existing value is replaced only
-by `rotate` or `edit` of an item declaring `rotate = true`, by `set --replace`
-of an entered value after confirmation, or by re-deriving a hash whenever its
-source changes.
+by `rotate` of a generated item declaring `rotate = true`, by `set --replace`
+or `edit` of an entered value, or by re-deriving a hash whenever its source
+changes.
+`sync` re-encrypts a value whose recipients no longer match the
+administrators, keeping the value itself.
 """
 
 import argparse
@@ -130,6 +132,40 @@ EDITOR_HARDENING = {
 }
 
 
+AGE_MAGIC = b"age-encryption.org/v1\n"
+AGE_ARMOR = b"-----BEGIN AGE ENCRYPTED FILE-----"
+
+
+def recipient_stanza(recipient: str) -> tuple[str, str | None]:
+    """The header stanza encrypting to RECIPIENT, as (type, tag). SSH stanzas
+    carry the first four bytes of the key's SHA-256 as a tag; X25519 stanzas
+    carry nothing that identifies the recipient, so they compare by count."""
+    if recipient.startswith("age1"):
+        return ("X25519", None)
+    kind, key = recipient.split()[:2]
+    digest = hashlib.sha256(base64.b64decode(key)).digest()
+    return (kind, base64.b64encode(digest[:4]).decode().rstrip("="))
+
+
+def header_stanzas(data: bytes) -> list[tuple[str, str | None]]:
+    """The recipient stanzas of an age file, read from its unencrypted header.
+    Grease stanzas, which age adds at random, are dropped."""
+    if data.startswith(AGE_ARMOR):
+        body = data.decode("ascii").strip().splitlines()[1:-1]
+        data = base64.b64decode("".join(body))
+    if not data.startswith(AGE_MAGIC):
+        raise Failure("not an age file")
+    stanzas = []
+    for line in data.split(b"\n---", 1)[0].split(b"\n"):
+        if not line.startswith(b"-> "):
+            continue
+        kind, *arguments = line[3:].decode("latin-1").split(" ")
+        if kind.endswith("-grease"):
+            continue
+        stanzas.append((kind, arguments[0] if kind.startswith("ssh-") and arguments else None))
+    return stanzas
+
+
 def plaintext_directory() -> str | None:
     """Memory-backed on Linux; macOS has none by default, so $TMPDIR, which is
     per-user and encrypted with the disk."""
@@ -191,6 +227,13 @@ class Secrets:
             raise Failure(f"'{item.name}' has no value yet")
         return run(["rage", "-d", *self.identity_args(), str(item.file)])
 
+    def recipients_current(self, item: Item) -> bool:
+        """Whether ITEM is encrypted to exactly the declared recipients, read
+        from its header, so no identity is needed. Exact for SSH keys; `age1`
+        keys only by count, so replacing one with another goes unnoticed."""
+        expected = sorted(map(recipient_stanza, self.manifest.recipients), key=str)
+        return sorted(header_stanzas(item.file.read_bytes()), key=str) == expected
+
     def store(self, item: Item, value: str, *, replace: bool) -> None:
         """Encrypts beside the target, then publishes: `create` never
         overwrites (a hard link fails on an existing name), `replace` swaps
@@ -242,10 +285,11 @@ class Secrets:
     # -- values --------------------------------------------------------------
 
     @staticmethod
-    def prompt_password(name: str) -> str:
-        password = getpass.getpass(f"Password for {name}: ")
+    def prompt_password(name: str, label: str = "Password") -> str:
+        """Asked twice: a typo would otherwise be stored unseen. Empty cancels."""
+        password = getpass.getpass(f"{label} for {name}: ")
         if not password or password != getpass.getpass("Confirm: "):
-            raise Failure("passwords are empty or do not match")
+            raise Failure(f"{label.lower()}s are empty or do not match; nothing was changed")
         return password
 
     def generate(self, item: Item, source_value: str | None = None) -> str:
@@ -293,6 +337,8 @@ class Secrets:
         self.rekey()
 
     def confirm_replace(self, item: Item) -> None:
+        """For `rotate`, which replaces a generated value; an entered one is
+        typed twice, which already shows the intent."""
         if not self.assume_yes:
             if input(f"Replace '{item.name}' for good? Type its name to confirm: ") != item.name:
                 raise Failure("not confirmed")
@@ -334,6 +380,8 @@ class Secrets:
                 state = "ok"
                 if source and not source.file.exists():
                     state = f"source missing: run {'set' if source.entered else 'sync'} {source.name}"
+                elif not self.recipients_current(item):
+                    state = "recipients changed: run sync"
                 elif source:
                     try:
                         if not self.derived_matches(item):
@@ -357,7 +405,6 @@ class Secrets:
 
     def sync(self) -> int:
         self.require_changes_allowed()
-        stale = set()
         for item in self.manifest.ordered():
             source = self.manifest.items[item.source] if item.source else None
             if source and item.file.exists() and not source.file.exists():
@@ -365,14 +412,32 @@ class Secrets:
                     f"'{item.name}' exists but its source '{source.name}' does not; "
                     f"delete {item.file} explicitly, then run sync again"
                 )
-            if source and item.file.exists() and not self.derived_matches(item):
-                stale.add(item.name)
-        created, repaired, pending, values = 0, 0, [], {}
+        # Decrypted before anything is written, so a value this machine cannot
+        # read stops the run with every file as it was.
+        reencrypt = {}
+        for item in self.manifest.ordered():
+            if item.file.exists() and not self.recipients_current(item):
+                try:
+                    reencrypt[item.name] = self.decrypt(item)
+                except Failure:
+                    raise Failure(
+                        f"'{item.name}' must be re-encrypted for the declared administrators, but no "
+                        f"identity here can decrypt it; run sync where a key it is encrypted to is available"
+                    ) from None
+        stale = {
+            item.name
+            for item in self.manifest.ordered()
+            if item.source and item.file.exists() and not self.derived_matches(item)
+        }
+        created, repaired, reencrypted, pending, values = 0, 0, 0, [], {}
         for item in self.manifest.ordered():
             if item.file.exists():
                 if item.name in stale:
                     self.store(item, self.generate(item), replace=True)
                     repaired += 1
+                elif item.name in reencrypt:
+                    self.store(item, reencrypt[item.name], replace=True)
+                    reencrypted += 1
                 continue
             if item.entered:
                 pending.append(item.name)
@@ -387,6 +452,8 @@ class Secrets:
         print(f"Created {created} secret(s).", file=sys.stderr)
         if repaired:
             print(f"Repaired {repaired} derived hash(es).", file=sys.stderr)
+        if reencrypted:
+            print(f"Re-encrypted {reencrypted} secret(s) for the declared recipients.", file=sys.stderr)
         if pending:
             print(f"Still without a value (use `nstdl secret set`): {', '.join(pending)}", file=sys.stderr)
         self.rekey()
@@ -396,7 +463,7 @@ class Secrets:
         if item.generator is not None:
             return self.generate(item)
         if sys.stdin.isatty():
-            return getpass.getpass(f"Value for {item.name}: ")
+            return self.prompt_password(item.name, "Value")
         return sys.stdin.read().removesuffix("\n")
 
     def set(self, item: Item, replace: bool = False) -> int:
@@ -406,21 +473,17 @@ class Secrets:
         exists = item.file.exists()
         if exists and not replace:
             raise Failure(f"'{item.name}' already has a value; use set --replace to correct it")
-        if exists:
-            self.confirm_replace(item)
         self.publish(item, self.entered_value(item), replace=exists)
         return 0
 
     def edit(self, item: Item) -> int:
         self.require_changes_allowed()
         if not sys.stdin.isatty():
-            raise Failure("edit needs a terminal; pipe a new value into rotate instead")
+            raise Failure("edit needs a terminal; pipe a new value into set --replace instead")
         if item.generator is not None:
             raise Failure(f"'{item.name}' is generated; use rotate")
         if not item.file.exists():
             raise Failure(f"'{item.name}' has no value yet; use set")
-        if not item.rotate:
-            raise Failure(f"'{item.name}' does not allow replacing its value (rotate = false)")
         old = self.decrypt(item)
         new = edit_in_editor(item.name, old)
         if new == old:
@@ -433,12 +496,14 @@ class Secrets:
         self.require_changes_allowed()
         if item.source is not None:
             raise Failure(f"'{item.name}' is derived; rotate its source '{item.source}'")
+        if item.entered:
+            raise Failure(f"'{item.name}' is entered; replace it with set --replace")
         if not item.rotate:
             raise Failure(f"'{item.name}' does not allow rotation (rotate = false)")
         if not item.file.exists():
-            raise Failure(f"'{item.name}' has no value yet; use {'set' if item.entered else 'sync'}")
+            raise Failure(f"'{item.name}' has no value yet; use sync")
         self.confirm_replace(item)
-        self.publish(item, self.entered_value(item) if item.entered else self.generate(item), replace=True)
+        self.publish(item, self.generate(item), replace=True)
         return 0
 
     def view(self, item: Item) -> int:
@@ -1213,20 +1278,20 @@ def parser(manifest: Manifest) -> argparse.ArgumentParser:
 
     secret = nouns.add_parser("secret", help="age secrets declared in nstdl.secrets.items")
     verbs = secret.add_subparsers(dest="verb", required=True, metavar="VERB")
-    status = verbs.add_parser("status", help="declared secrets, missing values and pending rekeys")
-    status.add_argument("--check", action="store_true", help="exit 3 when anything is missing or not rekeyed")
-    verbs.add_parser("sync", help="create every missing generated secret, then rekey; run after any declaration change")
+    status = verbs.add_parser("status", help="declared secrets, missing values, changed recipients and pending rekeys")
+    status.add_argument("--check", action="store_true", help="exit 3 when anything is missing, not re-encrypted or not rekeyed")
+    verbs.add_parser("sync", help="create every missing generated secret, re-encrypt for changed administrators, then rekey; run after any declaration change")
     for verb, text in (
         ("set", "enter the value of an externally issued secret or a self-chosen password"),
-        ("edit", "change an externally issued value in $EDITOR (needs rotate = true)"),
-        ("rotate", "replace a value: generate a new one or enter it (needs rotate = true)"),
+        ("edit", "change an externally issued value in $EDITOR"),
+        ("rotate", "replace a generated value with a new one (needs rotate = true)"),
         ("view", "print the decrypted value"),
         ("verify", "check a typed password against a stored password hash"),
     ):
         command = verbs.add_parser(verb, help=text)
         command.add_argument("item", choices=sorted(manifest.items), metavar="ITEM")
         if verb == "set":
-            command.add_argument("--replace", action="store_true", help="correct an existing entered value, after typing its name to confirm")
+            command.add_argument("--replace", action="store_true", help="correct an existing entered value")
     verbs.add_parser("rekey", help="rekey every secret for its hosts")
 
     diff_command = nouns.add_parser(
