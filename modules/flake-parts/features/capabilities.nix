@@ -1,4 +1,3 @@
-{ inputs }:
 let
   javascriptTools =
     pkgs: with pkgs; [
@@ -209,7 +208,6 @@ in
             pkgs.nix-du
             pkgs.nix-tree
             pkgs.deploy-rs
-            inputs.ragenix.packages.${pkgs.stdenv.hostPlatform.system}.default
             diff-gen
           ];
         };

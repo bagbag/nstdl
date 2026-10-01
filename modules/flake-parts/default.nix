@@ -222,7 +222,7 @@ in
     ./features/linux-builder.nix
     (import ./features/sleepless.nix { inherit inputs; })
     ./features/hardware.nix
-    (import ./features/capabilities.nix { inherit inputs; })
+    ./features/capabilities.nix
     ./storage.nix
     ./network.nix
     ./deployment.nix
