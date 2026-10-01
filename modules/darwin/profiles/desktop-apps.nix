@@ -6,7 +6,6 @@
     "keepassxc"
     "linearmouse"
     "rustdesk"
-    "spacedrive"
     "stats"
     "spotify"
     "utm"
