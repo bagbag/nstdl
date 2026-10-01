@@ -287,6 +287,21 @@ class SecretCommandTest(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError):
             self.decrypt("key")
 
+    def test_a_file_that_is_not_age_is_reported_per_secret(self):
+        self.nstdl("--yes", "secret", "sync")
+        broken = self.root / "secrets" / "key.age"
+        broken.write_text("$6$not$encrypted\n")
+
+        status = self.nstdl("secret", "status", "--check")
+        self.assertEqual(status.returncode, 3, status.stderr)
+        self.assertRegex(status.stdout, r"key\s+not an age file: replace or delete it")
+        self.assertRegex(status.stdout, r"token\s+ok")
+
+        synced = self.nstdl("--yes", "secret", "sync")
+        self.assertEqual(synced.returncode, 1)
+        self.assertIn("secrets/key.age", synced.stderr)
+        self.assertEqual(broken.read_text(), "$6$not$encrypted\n")
+
     def test_sync_cannot_reencrypt_without_a_key_it_is_encrypted_to(self):
         self.nstdl("--yes", "secret", "sync")
         before = {path.name: path.read_bytes() for path in (self.root / "secrets").glob("*.age")}

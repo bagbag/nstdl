@@ -151,8 +151,11 @@ def header_stanzas(data: bytes) -> list[tuple[str, str | None]]:
     """The recipient stanzas of an age file, read from its unencrypted header.
     Grease stanzas, which age adds at random, are dropped."""
     if data.startswith(AGE_ARMOR):
-        body = data.decode("ascii").strip().splitlines()[1:-1]
-        data = base64.b64decode("".join(body))
+        try:
+            body = data.decode("ascii").strip().splitlines()[1:-1]
+            data = base64.b64decode("".join(body))
+        except ValueError:
+            raise Failure("not an age file") from None
     if not data.startswith(AGE_MAGIC):
         raise Failure("not an age file")
     stanzas = []
@@ -232,7 +235,11 @@ class Secrets:
         from its header, so no identity is needed. Exact for SSH keys; `age1`
         keys only by count, so replacing one with another goes unnoticed."""
         expected = sorted(map(recipient_stanza, self.manifest.recipients), key=str)
-        return sorted(header_stanzas(item.file.read_bytes()), key=str) == expected
+        try:
+            stanzas = header_stanzas(item.file.read_bytes())
+        except Failure:
+            raise Failure(f"{item.file} is not an age file") from None
+        return sorted(stanzas, key=str) == expected
 
     def store(self, item: Item, value: str, *, replace: bool) -> None:
         """Encrypts beside the target, then publishes: `create` never
@@ -378,9 +385,15 @@ class Secrets:
                     state = "missing: run set" if item.entered else "missing: run sync"
             else:
                 state = "ok"
+                try:
+                    recipients = self.recipients_current(item)
+                except Failure:
+                    recipients = None
                 if source and not source.file.exists():
                     state = f"source missing: run {'set' if source.entered else 'sync'} {source.name}"
-                elif not self.recipients_current(item):
+                elif recipients is None:
+                    state = "not an age file: replace or delete it"
+                elif not recipients:
                     state = "recipients changed: run sync"
                 elif source:
                     try:
