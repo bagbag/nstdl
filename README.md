@@ -448,8 +448,9 @@ accounts, and optional root break-glass access.
   plus Quay search registries on NixOS; on macOS it supplies `podman` and
   `podman-compose`, while the user initializes and starts the Podman VM once
   with `podman machine init` and `podman machine start`.
-- `battery-charge-limit`: on newer Apple Silicon firmware, configures `batt`
-  through Homebrew with a 65–70% charge band. It keeps upstream diagnostic
+- `battery-charge-limit`: on newer Apple Silicon firmware, installs the `batt`
+  Homebrew formula from `HEAD` and configures it with a 65–70% charge band. It
+  keeps upstream diagnostic
   logging and allows local users to temporarily suspend the limit with
   `batt disable --for=1d`; the next configuration activation restores the
   declared band. Disable macOS Optimized Battery Charging and any native

@@ -7,7 +7,12 @@ let
   });
 in
 {
-  homebrew.brews = [ "batt" ];
+  homebrew.brews = [
+    {
+      name = "batt";
+      args = [ "HEAD" ];
+    }
+  ];
 
   system.activationScripts.postActivation.text = ''
     install -o root -g wheel -m 0644 ${battConfig} /etc/batt.json
