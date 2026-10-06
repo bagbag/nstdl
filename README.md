@@ -490,7 +490,15 @@ accounts, and optional root break-glass access.
   `127.0.0.1:3900`) with declared buckets and keys. `garage-setup.service`
   creates them through the admin API and applies each key's permissions on
   the declared buckets exactly; services using a bucket should require it. It never
-  deletes. The RPC secret, admin token and key secrets are files read as
+  deletes. With `web.enable`, the web endpoint (`127.0.0.1:3902` by default)
+  serves the buckets declared with `buckets.<name>.website.enable` by
+  `Host: <bucket>`; `web.rootDomain` is only the optional
+  `<bucket>.<rootDomain>` form Garage requires a value for. Website access, its
+  documents and `buckets.<name>.quotas.{maxSize,maxObjects}` follow the
+  declaration exactly as well. One exception: enabling a website keeps a
+  `redirect_all` already stored on the bucket, which the admin API cannot
+  clear; S3 refuses to set one, so none exists unless written by other means.
+  The RPC secret, admin token and key secrets are files read as
   systemd credentials. A key's secret is fixed once imported: Garage cannot
   re-import a key ID even after deleting it, so a new secret needs a new key ID.
 - `secrets`: agenix plus agenix-rekey, with explicit host runtime ACLs.

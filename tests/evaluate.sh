@@ -477,6 +477,70 @@ fi
 grep -q 'key IDs need at least 8 characters' "${invalid_garage_output}"
 rm -f "${invalid_garage_output}"
 
+# A website bucket without the web endpoint would never be served.
+invalid_garage_output="$(mktemp)"
+if nix eval --impure --expr "
+  let
+    flake = builtins.getFlake \"path:${repo_dir}\";
+  in
+  (flake.inputs.nixpkgs.lib.nixosSystem {
+    system = \"x86_64-linux\";
+    modules = [
+      flake.nixosModules.garage
+      {
+        services.nstdl.garage = {
+          enable = true;
+          rpcSecretFile = \"/run/rpc\";
+          adminTokenFile = \"/run/admin\";
+          buckets.site.website.enable = true;
+        };
+        boot.loader.grub.devices = [ \"nodev\" ];
+        fileSystems.\"/\" = {
+          device = \"/dev/null\";
+          fsType = \"ext4\";
+        };
+        system.stateVersion = \"25.11\";
+      }
+    ];
+  }).config.system.build.toplevel.drvPath
+" >"${invalid_garage_output}" 2>&1; then
+  echo "a Garage website bucket without web.enable must be rejected" >&2
+  exit 1
+fi
+grep -q 'website.enable requires services.nstdl.garage.web.enable' "${invalid_garage_output}"
+rm -f "${invalid_garage_output}"
+
+# Without web.enable no [s3_web] section is rendered: Garage would bind it.
+garage_settings_keys="$(nix eval --impure --raw --expr "
+  let
+    flake = builtins.getFlake \"path:${repo_dir}\";
+  in
+  builtins.concatStringsSep \" \" (builtins.attrNames (flake.inputs.nixpkgs.lib.nixosSystem {
+    system = \"x86_64-linux\";
+    modules = [
+      flake.nixosModules.garage
+      {
+        services.nstdl.garage = {
+          enable = true;
+          rpcSecretFile = \"/run/rpc\";
+          adminTokenFile = \"/run/admin\";
+          buckets.site = { };
+        };
+        boot.loader.grub.devices = [ \"nodev\" ];
+        fileSystems.\"/\" = {
+          device = \"/dev/null\";
+          fsType = \"ext4\";
+        };
+        system.stateVersion = \"25.11\";
+      }
+    ];
+  }).config.services.garage.settings)
+")"
+if [[ " ${garage_settings_keys} " == *" s3_web "* || " ${garage_settings_keys} " != *" s3_api "* ]]; then
+  echo "Garage without web.enable must render s3_api but no s3_web, got: ${garage_settings_keys}" >&2
+  exit 1
+fi
+
 nix eval --impure --raw --expr "
   let
     flake = builtins.getFlake \"path:${repo_dir}\";

@@ -30,10 +30,37 @@ let
 
   credential = id: "key-${id}";
 
+  # Garage rejects documents alongside `enabled = false`. Otherwise every field
+  # is sent, overwriting what an owner key may have set over S3
+  # `PutBucketWebsite`: a null errorDocument clears one, and an omitted
+  # routingRules would keep the existing rules.
+  websiteAccess =
+    website:
+    if website.enable then
+      {
+        enabled = true;
+        inherit (website) indexDocument errorDocument;
+        routingRules = [ ];
+      }
+    else
+      { enabled = false; };
+
+  # Both branches leave the bucket's info in $response (CreateBucket returns
+  # the same shape as GetBucketInfo). Like key permissions, website access and
+  # quotas are written on every run rather than diffed; a null quota clears it.
   bucketScript = name: ''
     if ! get "/v2/GetBucketInfo?globalAlias=${name}"; then
       jq -n --arg alias ${lib.escapeShellArg name} '{globalAlias: $alias}' | post /v2/CreateBucket
     fi
+    bucket_id=$(jq -r .id "$response")
+    printf '%s' ${
+      lib.escapeShellArg (
+        builtins.toJSON {
+          websiteAccess = websiteAccess cfg.buckets.${name}.website;
+          inherit (cfg.buckets.${name}) quotas;
+        }
+      )
+    } | post "/v2/UpdateBucket?id=$bucket_id"
   '';
 
   keyScript =
@@ -73,11 +100,14 @@ in
   options.services.nstdl.garage = {
     enable = lib.mkEnableOption ''
       single-node Garage object storage, listening on loopback only: S3 on
-      127.0.0.1:3900, RPC on 3901, admin API on 3903.
+      127.0.0.1:3900, RPC on 3901, admin API on 3903, and with `web.enable`
+      the web endpoint on 3902 by default.
 
       Buckets and keys are declared here and applied by `garage-setup.service`,
       which services using them should require. It creates and grants, and
-      never deletes: undeclared buckets and keys are left as they are'';
+      never deletes: undeclared buckets and keys are left as they are. For a
+      declared bucket, website access, quotas and key permissions follow the
+      declaration exactly'';
 
     package = lib.mkPackageOption pkgs "garage_2" { };
 
@@ -97,10 +127,79 @@ in
       description = "S3 region name clients must use.";
     };
 
+    web = {
+      enable = lib.mkEnableOption ''
+        Garage's web endpoint: anonymous reads of the buckets with
+        `website.enable`, chosen by `Host` header. It never lists a bucket,
+        but serves every object in one to whoever reaches it'';
+
+      bindAddress = lib.mkOption {
+        type = lib.types.str;
+        default = "127.0.0.1:3902";
+        description = "Address and port, or Unix socket path, of the web endpoint. Off loopback, every website bucket is public to that network.";
+      };
+
+      rootDomain = lib.mkOption {
+        type = lib.types.nonEmptyStr;
+        default = ".web.garage.localhost";
+        description = ''
+          Suffix Garage strips from the `Host` header to find the bucket
+          (`<bucket>.web.garage.localhost`). A host without it is taken as the
+          bucket name itself, so a client or proxy sending `Host: <bucket>`
+          never needs a matching domain. Defaulted because Garage 2.x refuses
+          an `[s3_web]` section without it, its documentation calling it
+          optional notwithstanding; the default is Garage's own quick-start
+          value, under `.localhost`, which never resolves off the host.
+        '';
+      };
+    };
+
     buckets = lib.mkOption {
-      type = lib.types.attrsOf (lib.types.submodule { });
       default = { };
       description = "Buckets to create, by global alias.";
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options.website = {
+            enable = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = ''
+                Whether the web endpoint serves this bucket; requires
+                `web.enable`. Applied exactly: left off, website access is
+                disabled on every run, also when it was enabled over S3.
+              '';
+            };
+
+            indexDocument = lib.mkOption {
+              type = lib.types.nonEmptyStr;
+              default = "index.html";
+              description = "Object served for `/` and any path ending in `/`, relative to it. A missing one is a 404.";
+            };
+
+            errorDocument = lib.mkOption {
+              type = lib.types.nullOr lib.types.nonEmptyStr;
+              default = null;
+              description = "Object served, with the error's status, on a 4xx for GET; null keeps Garage's plain error response.";
+            };
+          };
+
+          # Garage refuses writes past a quota, counting only what a write adds:
+          # overwriting an object with one no larger always succeeds.
+          options.quotas = {
+            maxSize = lib.mkOption {
+              type = lib.types.nullOr lib.types.ints.positive;
+              default = null;
+              description = "Total size of the bucket's objects in bytes; null is unlimited.";
+            };
+
+            maxObjects = lib.mkOption {
+              type = lib.types.nullOr lib.types.ints.positive;
+              default = null;
+              description = "Number of objects in the bucket; null is unlimited.";
+            };
+          };
+        }
+      );
     };
 
     keys = lib.mkOption {
@@ -148,6 +247,10 @@ in
         message = "services.nstdl.garage.buckets: names need 3–63 characters from [a-z0-9.-], starting and ending alphanumerically.";
       }
       {
+        assertion = cfg.web.enable || lib.all (bucket: !bucket.website.enable) (lib.attrValues cfg.buckets);
+        message = "services.nstdl.garage.buckets.<name>.website.enable requires services.nstdl.garage.web.enable.";
+      }
+      {
         assertion = lib.all (key: lib.all (bucket: cfg.buckets ? ${bucket}) (lib.attrNames key.allow)) (
           lib.attrValues cfg.keys
         );
@@ -170,6 +273,10 @@ in
         s3_api = {
           s3_region = cfg.region;
           api_bind_addr = "127.0.0.1:3900";
+        };
+        s3_web = lib.mkIf cfg.web.enable {
+          bind_addr = cfg.web.bindAddress;
+          root_domain = cfg.web.rootDomain;
         };
         admin = {
           api_bind_addr = "127.0.0.1:3903";
