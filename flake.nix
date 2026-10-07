@@ -89,7 +89,7 @@
 
       # Key preparation must also work before a secrets-enabled consumer flake
       # has a declared recipient and can evaluate its own nstdl package.
-      packages = lib.genAttrs [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ] (
+      packages = lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ] (
         system:
         let
           pkgs = inputs.nixpkgs.legacyPackages.${system};

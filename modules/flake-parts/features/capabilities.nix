@@ -178,9 +178,7 @@ in
             pkgs.codex
             pkgs.claude-code
           ];
-          home.sessionPath = lib.optionals pkgs.stdenv.isDarwin [
-            (if pkgs.stdenv.hostPlatform.system == "aarch64-darwin" then "/opt/homebrew/bin" else "/usr/local/bin")
-          ];
+          home.sessionPath = lib.optionals pkgs.stdenv.isDarwin [ "/opt/homebrew/bin" ];
         };
       secret-admin =
         { pkgs, ... }:
