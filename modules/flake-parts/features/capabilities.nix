@@ -174,7 +174,10 @@ in
       ai-agent-tools =
         { lib, pkgs, ... }:
         {
-          home.packages = pkgs.lib.optionals pkgs.stdenv.isLinux [
+          home.packages = [
+            pkgs.beads
+          ]
+          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             pkgs.codex
             pkgs.claude-code
           ];
