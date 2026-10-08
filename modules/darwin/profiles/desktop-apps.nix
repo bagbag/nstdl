@@ -10,6 +10,7 @@
     "spotify"
     "utm"
     "visual-studio-code"
+    "vorssaint"
     "whatsapp"
   ];
 }
