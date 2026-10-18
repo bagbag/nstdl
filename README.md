@@ -436,7 +436,11 @@ accounts, and optional root break-glass access.
   `ai-agent-tools` installs Codex and Claude Code through Nix on Linux; on
   Darwin it installs the Codex, latest-channel Claude Code, Claude, and ChatGPT
   Homebrew casks. On both platforms it installs the beads (`bd`) agent issue
-  tracker through Nix.
+  tracker through Nix. Codex runs every command in a non-interactive login
+  Zsh (`zsh -lc`) and cannot select another shell, so the feature makes that
+  Zsh split unquoted variables, keep unmatched globs and leave `=word` literal,
+  as bash does; drop this once Codex can select its shell. Claude Code can run
+  real bash instead via the consumer's `CLAUDE_CODE_SHELL` setting.
   `messaging` installs Signal through Nix on Linux and the Discord and Signal
   Homebrew casks on Darwin.
   `qui` runs the qBittorrent web UI with systemd on NixOS and launchd on

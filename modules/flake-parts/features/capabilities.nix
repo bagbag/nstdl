@@ -182,6 +182,15 @@ in
             pkgs.claude-code
           ];
           home.sessionPath = lib.optionals pkgs.stdenv.isDarwin [ "/opt/homebrew/bin" ];
+          # Codex runs each command as `zsh -lc` and offers no shell setting;
+          # agents write bash, so split words, keep unmatched globs and leave
+          # `=word` literal as bash does. Drop once Codex can select its shell.
+          programs.zsh.profileExtra = ''
+            if [[ ! -o interactive ]]; then
+              setopt sh_word_split no_nomatch
+              unsetopt equals
+            fi
+          '';
         };
       secret-admin =
         { pkgs, ... }:
