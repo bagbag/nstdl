@@ -19,6 +19,8 @@ in
 {
   home.packages = with pkgs; [
     btop
+    coreutils
+    gh
     gping
     hexyl
     hyperfine
