@@ -48,7 +48,16 @@ class SecretCommandTest(unittest.TestCase):
             return {"file": file, "rotate": rotate, "generator": generator, "hosts": list(hosts)}
 
         host = {"name": "server", "pubkey": "ssh-ed25519 AAAAhost", "rekeyedDir": "secrets/rekeyed/server"}
-        random = {"type": "random", "format": "hex", "bytes": 32, "length": None, "words": 6, "from": None}
+        random = {
+            "type": "random",
+            "format": "hex",
+            "bytes": 32,
+            "length": None,
+            "words": 6,
+            "from": None,
+            "method": "yescrypt",
+            "rounds": None,
+        }
         manifest = {
             "recipients": [recipient],
             "identities": [self.identity, "~/does-not-exist"],
@@ -77,9 +86,9 @@ class SecretCommandTest(unittest.TestCase):
         self.manifest.write_text(json.dumps(manifest))
         self.environment = {**os.environ, "NSTDL_MANIFEST": str(self.manifest), "NSTDL_AGENIX": str(agenix)}
 
-    def assert_hash_of(self, name, password):
+    def assert_hash_of(self, name, password, prefix="$y$"):
         stored = self.decrypt(name)
-        self.assertTrue(stored.startswith("$y$"))
+        self.assertTrue(stored.startswith(prefix), stored[:20])
         recomputed = subprocess.run(
             ["mkpasswd", f"--salt={stored.rsplit('$', 1)[0]}", "--stdin"],
             input=password,
@@ -231,6 +240,51 @@ class SecretCommandTest(unittest.TestCase):
         self.assertEqual(synced.returncode, 0, synced.stderr)
         self.assertIn("Repaired 1 derived hash(es).", synced.stderr)
         self.assert_hash_of("ext-password-hash", "two")
+
+    def redeclare(self, name, **generator):
+        manifest = json.loads(self.manifest.read_text())
+        manifest["items"][name]["generator"].update(generator)
+        self.manifest.write_text(json.dumps(manifest))
+
+    def test_sha512crypt_hash_follows_its_declared_rounds(self):
+        self.redeclare("admin-password-hash", method="sha512crypt", rounds=1000)
+        created = self.nstdl("--yes", "secret", "sync")
+        self.assertEqual(created.returncode, 0, created.stderr)
+        passphrase = self.decrypt("admin-password")
+        self.assert_hash_of("admin-password-hash", passphrase, "$6$rounds=1000$")
+
+        self.redeclare("admin-password-hash", rounds=2000)
+        status = self.nstdl("secret", "status", "--check")
+        self.assertRegex(status.stdout, r"admin-password-hash\s+out of sync: run sync")
+        synced = self.nstdl("--yes", "secret", "sync")
+        self.assertIn("Repaired 1 derived hash(es).", synced.stderr)
+        self.assert_hash_of("admin-password-hash", passphrase, "$6$rounds=2000$")
+
+    def test_sha512crypt_at_its_default_rounds_stays_in_sync(self):
+        # crypt omits the rounds= field at 5000, which must not read as a changed declaration.
+        self.redeclare("admin-password-hash", method="sha512crypt", rounds=5000)
+        self.nstdl("--yes", "secret", "sync")
+        self.assertFalse(self.decrypt("admin-password-hash").startswith("$6$rounds="))
+        status = self.nstdl("secret", "status")
+        self.assertNotRegex(status.stdout, r"admin-password-hash\s+out of sync")
+
+    def test_status_reports_an_entered_hash_whose_method_changed(self):
+        # `set` prompts for a chosen password at a terminal only; store a yescrypt hash directly.
+        stored = subprocess.run(
+            ["mkpasswd", "--method=yescrypt", "--stdin"], input="chosen", check=True, capture_output=True, text=True
+        ).stdout
+        recipient = json.loads(self.manifest.read_text())["recipients"][0]
+        (self.root / "secrets").mkdir(exist_ok=True)
+        subprocess.run(
+            ["rage", "-e", "-r", recipient, "-o", str(self.root / "secrets/chosen-password-hash.age")],
+            input=stored,
+            check=True,
+            text=True,
+        )
+        self.assertRegex(self.nstdl("secret", "status").stdout, r"chosen-password-hash\s+ok")
+        self.redeclare("chosen-password-hash", method="sha512crypt", rounds=1000)
+        status = self.nstdl("secret", "status")
+        self.assertRegex(status.stdout, r"chosen-password-hash\s+hash method changed: run set --replace")
 
     def test_status_cannot_verify_a_derived_hash_without_an_identity(self):
         created = self.nstdl("--yes", "secret", "set", "ext-password", input="one\n")

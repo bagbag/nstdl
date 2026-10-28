@@ -106,6 +106,16 @@ def run(argv: list[str], *, input: str | None = None, stdout=subprocess.PIPE, en
     return result.stdout or ""
 
 
+def hash_matches_declared(stored: str, generator: dict) -> bool:
+    """Whether a crypt hash was made with the declared method and cost."""
+    if generator["method"] == "sha512crypt":
+        # crypt writes no rounds= field for sha512crypt's default of 5000.
+        if generator["rounds"] == 5000:
+            return stored.startswith("$6$") and not stored.startswith("$6$rounds=")
+        return stored.startswith(f"$6$rounds={generator['rounds']}$")
+    return stored.startswith("$y$")
+
+
 def random_value(format: str, byte_count: int | None, length: int | None) -> str:
     """Byte formats encode exactly `byte_count` random bytes, so the value
     decodes back to them; character formats draw `length` characters
@@ -331,7 +341,11 @@ class Secrets:
                     password = self.decrypt(self.manifest.items[item.source])
                 if not password:
                     raise Failure(f"refusing to hash an empty password for '{item.name}'")
-                return run(["mkpasswd", "--method=yescrypt", "--stdin"], input=password).strip()
+                if generator["method"] == "sha512crypt":
+                    method = ["--method=sha-512", f"--rounds={generator['rounds']}"]
+                else:
+                    method = ["--method=yescrypt"]
+                return run(["mkpasswd", *method, "--stdin"], input=password).strip()
         raise Failure(f"unknown generator type {generator['type']!r}")
 
     def publish(self, item: Item, value: str, *, replace: bool) -> None:
@@ -361,9 +375,10 @@ class Secrets:
         return Path(host["rekeyedDir"]) / f"{identity}-{item.name}.age"
 
     def derived_matches(self, item: Item) -> bool:
-        """Check a stored crypt hash using its own setting and current source."""
+        """Check a stored crypt hash against the declared method and the current
+        source, using its own setting."""
         stored = self.decrypt(item).strip()
-        if not stored.startswith("$") or stored.count("$") < 3:
+        if not hash_matches_declared(stored, item.generator) or stored.count("$") < 3:
             return False
         source_value = self.decrypt(self.manifest.items[item.source])
         if not source_value:
@@ -401,6 +416,12 @@ class Secrets:
                             state = "out of sync: run sync"
                     except Failure:
                         state = "cannot verify source/hash"
+                elif item.generator and item.generator["type"] == "password-hash":
+                    try:
+                        if not hash_matches_declared(self.decrypt(item), item.generator):
+                            state = "hash method changed: run set --replace"
+                    except Failure:
+                        state = "cannot verify hash method"
                 if state == "ok":
                     for host in item.hosts:
                         if host["rekeyedDir"] is not None and not self.rekeyed_path(item, host).exists():

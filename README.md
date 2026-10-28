@@ -405,8 +405,12 @@ the count the value decodes to, default 32; or alphanumeric or
 alphanumeric-lowercase sized by `length` in characters, at least 80 bits,
 default 20),
 `passphrase`
-(`words` from the EFF long list, space-separated) and `password-hash` (yescrypt,
-from another secret or prompted). A generated value is created once and never
+(`words` from the EFF long list, space-separated) and `password-hash` (from
+another secret or prompted; `method` yescrypt by default, or sha512crypt for
+verifiers without yescrypt such as musl's crypt on OpenWrt, at 656000 `rounds`
+unless set lower deliberately for a slow device). A changed `method` or
+`rounds` puts a derived hash out of sync for `sync` to redo; an entered one is
+reported for `set --replace`. A generated value is created once and never
 replaced unless its item sets `rotate = true`; keep it false for keys whose
 change breaks existing data. An entered value follows its issuer, so it is
 always replaceable with `set --replace` or `edit`, and cannot set `rotate`. Derived hashes follow their source whenever it changes.

@@ -122,7 +122,7 @@ let
 
   # Byte formats encode random bytes for keys and tokens and are sized in
   # `bytes` (at least 16, 128 bits). Character formats are for typed passwords,
-  # which are only attackable through a slow yescrypt hash, and are sized in
+  # which are only attackable through a slow password hash, and are sized in
   # `length`: at least 80 bits.
   randomFormats = {
     hex.sizing = "bytes";
@@ -150,6 +150,10 @@ let
           in
           lib.optional (from != null && generator.type != "password-hash")
             "nstdl secret '${name}': generator.from is only valid for type password-hash"
+          ++ lib.optional (generator != null && generator.method != "yescrypt" && generator.type != "password-hash")
+            "nstdl secret '${name}': generator.method is only valid for type password-hash"
+          ++ lib.optional (generator != null && generator.rounds != null && generator.method != "sha512crypt")
+            "nstdl secret '${name}': generator.rounds is only valid for method sha512crypt"
           ++ lib.optional (from != null && source == null)
             "nstdl secret '${name}': generator.from references unknown secret '${from}'"
           ++ lib.optional (
@@ -219,7 +223,9 @@ let
               format
               words
               from
+              method
               ;
+            rounds = if item.generator.method == "sha512crypt" then lib.defaultTo 656000 item.generator.rounds else null;
             bytes =
               if randomFormats.${item.generator.format}.sizing == "bytes" then
                 lib.defaultTo 32 item.generator.bytes
@@ -368,7 +374,7 @@ in
                         "passphrase"
                         "password-hash"
                       ];
-                      description = "`random`: random bytes; `passphrase`: random words; `password-hash`: a yescrypt crypt hash.";
+                      description = "`random`: random bytes; `passphrase`: random words; `password-hash`: a crypt hash (`method`).";
                     };
                     format = mkOption {
                       type = types.enum (lib.attrNames randomFormats);
@@ -400,6 +406,19 @@ in
                       type = types.nullOr types.str;
                       default = null;
                       description = "password-hash: the secret whose value is hashed. Null means `nstdl secret set` prompts for the password.";
+                    };
+                    method = mkOption {
+                      type = types.enum [
+                        "yescrypt"
+                        "sha512crypt"
+                      ];
+                      default = "yescrypt";
+                      description = "password-hash: the crypt method. `sha512crypt` (`$6$`) is for verifiers without yescrypt, such as musl's crypt on OpenWrt.";
+                    };
+                    rounds = mkOption {
+                      type = types.nullOr (types.ints.between 1000 999999999);
+                      default = null;
+                      description = "password-hash, sha512crypt only: rounds. Default 656000 (passlib's); each login on the verifier pays for them, so a slow device may deliberately set fewer.";
                     };
                   };
                 }
