@@ -108,6 +108,10 @@
           pkgs = inputs.nixpkgs.legacyPackages.${system};
           module = ./modules/nixos/features/garage.nix;
         };
+        postgresql-backup = import ./tests/postgresql-backup.nix {
+          pkgs = inputs.nixpkgs.legacyPackages.${system};
+          module = ./modules/nixos/features/postgresql.nix;
+        };
       });
     };
 }

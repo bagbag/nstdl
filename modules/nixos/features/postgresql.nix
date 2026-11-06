@@ -1,4 +1,9 @@
-{ config, lib, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   cfg = config.services.nstdl.postgresql;
 
@@ -17,6 +22,17 @@ in
   imports = [ ./postgresql-backup.nix ];
 
   options.services.nstdl.postgresql = {
+    tool = lib.mkOption {
+      type = lib.types.package;
+      internal = true;
+      readOnly = true;
+      # Against the server's own package, so dumps and restores use its major version.
+      default = pkgs.callPackage ../../../packages/nstdl-postgresql {
+        postgresql = config.services.postgresql.package;
+      };
+      description = "nstdl-postgresql: backup sets, their restore, and declared role passwords.";
+    };
+
     enable = lib.mkEnableOption "nstdl PostgreSQL role and database management";
 
     vectorchord = lib.mkEnableOption ''
@@ -185,8 +201,10 @@ in
                 ${config.services.postgresql.package}/bin/psql --set=ON_ERROR_STOP=1 --dbname ${lib.escapeShellArg name} --command ${lib.escapeShellArg "CREATE EXTENSION IF NOT EXISTS \"${extension}\" CASCADE;"}
               '') managedDatabases.${name}.extensions
             ) (lib.attrNames managedDatabases)
+            # Hashed (SCRAM-SHA-256) before the server sees it: the password
+            # stays out of its logs and pg_stat_activity.
             ++ lib.mapAttrsToList (name: _: ''
-              ${config.services.postgresql.package}/bin/psql --set=ON_ERROR_STOP=1 --command "DO \$\$ DECLARE secret text := trim(pg_read_file('$CREDENTIALS_DIRECTORY/postgresql-role-${name}')); BEGIN EXECUTE format('ALTER ROLE %I PASSWORD %L', '${name}', secret); END \$\$;"
+              ${lib.getExe cfg.tool} set-password ${lib.escapeShellArg name} "$CREDENTIALS_DIRECTORY/postgresql-role-${name}"
             '') passwordRoles
           );
         };

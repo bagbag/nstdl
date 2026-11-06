@@ -425,6 +425,14 @@ use Linux 6.12 LTS; workstations use the latest kernel. See
 [accounts](docs/rebuild/accounts.md) for reusable SSH identities, normal
 accounts, and optional root break-glass access.
 
+On the host itself, `nstdl` runs operator commands that features register, such
+as `sudo nstdl postgresql restore SET`; without arguments it lists the commands
+this host has. It is not the repository tool: `deploy`, `secret` and the other
+commands above stay `./nstdl` in the configuration repository. A configuration
+adds its own with
+`nstdl.commands.<area>.<action> = { program = …; description = "…"; }`
+(lowercase names), run as `nstdl <area> <action> ARGS…`.
+
 ## Profiles
 
 - `core`: firewall, scheduled `nh clean` maintenance, Lix, systemd-boot/EFI,
@@ -473,9 +481,30 @@ accounts, and optional root break-glass access.
 - `intel`: Intel microcode, iHD VA-API, compute/NPU support, and active
   Intel P-state; `laptop` adds auto-cpufreq and thermald.
 - `postgresql`: typed PostgreSQL roles, databases, memberships, extensions
-  (created with `CASCADE`), and local dump backups. Role passwords use runtime
+  (created with `CASCADE`), and local backups. Role passwords use runtime
   files loaded as systemd credentials, so their contents cannot enter nstdl's
-  Nix configuration. `vectorchord` adds the VectorChord index extension.
+  Nix configuration; nstdl hashes them (SCRAM-SHA-256) before the server sees
+  them, and a trailing line ending is not part of the password. `vectorchord` adds the VectorChord index extension.
+  `backup.enable` writes a backup set of the whole server, daily by
+  default (`calendar`; null for on demand only:
+  `systemctl start nstdl-postgresql-backup`): one zstd-compressed custom-format
+  dump per database that accepts connections, except the exact names in
+  `exclude`, plus `globals.sql` with roles, memberships, password hashes and
+  tablespaces. A set is a folder named by its UTC time under `location`
+  (`/var/lib/nstdl-postgresql-backup`, created for the postgres user). It
+  appears only when every dump succeeded; a failed run leaves nothing behind,
+  fails the unit, and keeps earlier sets. After each successful run, `keep`
+  retains the newest set of each of the last 7 days, 4 ISO weeks and 6 months
+  that have one (`keep.daily`, `keep.weekly`, `keep.monthly`); every set is a
+  full copy on the server's disk. Restore with
+  `sudo nstdl postgresql restore /var/lib/nstdl-postgresql-backup/<set>` on a
+  host running the same or a newer PostgreSQL: it loads the roles, recreates
+  every database of the set with its owner, settings and grants (`template1`,
+  which cannot be dropped, gets its contents only; databases outside the set
+  stay), and reapplies the declared passwords, owners and
+  extensions. Empty databases the host created are replaced silently; for each
+  one holding tables, it asks you to type its name, and without a terminal it
+  refuses unless given `--yes`. It disconnects clients of replaced databases.
 - `paradedb`: ParadeDB `pg_search`, at the version tstdl's development image
   runs rather than nixpkgs', built with a fenix toolchain and preloaded.
   Create it per database through `postgresql`'s `extensions`.

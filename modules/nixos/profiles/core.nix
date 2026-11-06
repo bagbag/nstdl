@@ -8,6 +8,8 @@ let
   cfg = config.nstdl;
 in
 {
+  imports = [ ../commands.nix ];
+
   options.nstdl = {
     hostName = lib.mkOption {
       type = lib.types.str;

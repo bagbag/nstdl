@@ -224,24 +224,12 @@
                 services.nstdl.postgresql.backup = {
                   enable = true;
                   location = "/var/backup/postgresql";
-                  defaults = {
-                    calendar = "hourly";
-                    compression = "zstd";
-                    retentionDays = 14;
-                  };
-                  jobs = {
-                    app = { };
-                    app_plain = {
-                      database = "app";
-                      format = "plain";
-                      compression = "none";
-                    };
-                    globals = {
-                      kind = "globals";
-                      format = "plain";
-                      compression = "gzip";
-                      compressionLevel = 6;
-                    };
+                  exclude = [ "app_staging" ];
+                  calendar = "hourly";
+                  keep = {
+                    daily = 3;
+                    weekly = 2;
+                    monthly = 1;
                   };
                 };
               }

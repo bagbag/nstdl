@@ -120,65 +120,24 @@ nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-workstatio
 [[ "${workstation_system_packages}" == *'nodejs-'* && "${workstation_system_packages}" == *'oxlint-'* && "${workstation_system_packages}" != *'typst-'* && "${workstation_system_packages}" != *'pandoc-'* ]]
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.services.postgresql.ensureDatabases"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.services.postgresql.ensureUsers"
-nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.systemd.timers.nstdl-postgresql-backup-app.timerConfig"
-
-postgresql_backup_script="$(nix eval "${override[@]}" --apply 'builtins.unsafeDiscardStringContext' --raw "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-backup-app.script")"
-postgresql_plain_script="$(nix eval "${override[@]}" --apply 'builtins.unsafeDiscardStringContext' --raw "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-backup-app_plain.script")"
-postgresql_globals_script="$(nix eval "${override[@]}" --apply 'builtins.unsafeDiscardStringContext' --raw "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-backup-globals.script")"
-postgresql_backup_target="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.systemd.targets.nstdl-postgresql-backup.wants")"
+postgresql_backup_timer="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.systemd.timers.nstdl-postgresql-backup.timerConfig")"
+postgresql_backup_script="$(nix eval "${override[@]}" --apply 'builtins.unsafeDiscardStringContext' --raw "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-backup.script")"
+postgresql_backup_user="$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-backup.serviceConfig.User")"
+postgresql_backup_after="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-backup.after")"
+postgresql_backup_location="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.systemd.tmpfiles.settings.nstdl-postgresql-backup")"
+postgresql_restore_command="$(nix eval "${override[@]}" --json --apply 'commands: commands.postgresql.restore.description' "${fixture}#nixosConfigurations.test-postgresql.config.nstdl.commands")"
+postgresql_system_packages="$(nix eval "${override[@]}" --json --apply 'packages: builtins.map (package: package.name) packages' "${fixture}#nixosConfigurations.test-postgresql.config.environment.systemPackages")"
 postgresql_reconcile_script="$(nix eval "${override[@]}" --apply 'builtins.unsafeDiscardStringContext' --raw "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-reconcile.script")"
 postgresql_reconcile_credentials="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-reconcile.serviceConfig.LoadCredential")"
 postgresql_reconcile_wanted_by="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-reconcile.wantedBy")"
-postgresql_backup_after="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-backup-app.after")"
-[[ "${postgresql_backup_script}" == *"pg_dump"* && "${postgresql_backup_script}" == *"--format=custom"* && "${postgresql_backup_script}" == *"--compress=zstd:10"* && "${postgresql_backup_script}" == *"-mtime +14"* ]]
-[[ "${postgresql_plain_script}" == *"pg_dump"* && "${postgresql_plain_script}" == *"--create"* && "${postgresql_plain_script}" == *"| cat >"* && "${postgresql_plain_script}" != *"--compress="* && "${postgresql_plain_script}" == *"%Y-%m-%d-%H%M%S-%N"* && "${postgresql_plain_script}" == *"mv --no-clobber"* ]]
-[[ "${postgresql_globals_script}" == *"pg_dumpall --globals-only"* && "${postgresql_globals_script}" == *"gzip -c -6"* ]]
-[[ "${postgresql_backup_target}" == *"nstdl-postgresql-backup-app.service"* && "${postgresql_backup_target}" == *"nstdl-postgresql-backup-app_plain.service"* && "${postgresql_backup_target}" == *"nstdl-postgresql-backup-globals.service"* ]]
 [[ "${postgresql_reconcile_script}" == *"GRANT \"app_readers\" TO \"app\""* && "${postgresql_reconcile_script}" == *"CREATE EXTENSION IF NOT EXISTS \"pgcrypto\""* ]]
-[[ "${postgresql_reconcile_credentials}" == *"postgresql-role-app:/run/agenix/app-db-password"* && "${postgresql_reconcile_script}" == *"pg_read_file('\$CREDENTIALS_DIRECTORY/postgresql-role-app')"* ]]
+[[ "${postgresql_reconcile_credentials}" == *"postgresql-role-app:/run/agenix/app-db-password"* && "${postgresql_reconcile_script}" == *"/bin/nstdl-postgresql set-password app \"\$CREDENTIALS_DIRECTORY/postgresql-role-app\""* ]]
 [[ "${postgresql_reconcile_wanted_by}" == *"multi-user.target"* && "${postgresql_backup_after}" == *"postgresql-setup.service"* ]]
-
-postgresql_invalid_output="$(mktemp)"
-if nix eval --impure --expr "
-  let
-    flake = builtins.getFlake \"path:${repo_dir}\";
-  in
-  (flake.inputs.nixpkgs.lib.nixosSystem {
-    system = \"x86_64-linux\";
-    modules = [
-      (import "${repo_dir}/modules/nixos/features/postgresql.nix")
-      {
-        services.nstdl.postgresql = {
-          enable = true;
-          backup.enable = true;
-          backup.jobs.cluster = {
-            kind = \"cluster\";
-            format = \"custom\";
-          };
-        };
-        boot.loader.grub = {
-          enable = true;
-          devices = [ \"nodev\" ];
-        };
-        fileSystems.\"/\" = {
-          device = \"/dev/null\";
-          fsType = \"ext4\";
-        };
-        system.stateVersion = \"25.11\";
-      }
-    ];
-  }).config.system.build.toplevel.drvPath
-" >"${postgresql_invalid_output}" 2>&1; then
-  echo "cluster PostgreSQL backups must reject custom format" >&2
-  rm -f "${postgresql_invalid_output}"
-  exit 1
-fi
-if ! rg -q "requires format = plain" "${postgresql_invalid_output}"; then
-  echo "cluster PostgreSQL backup failure must identify the format invariant" >&2
-  rm -f "${postgresql_invalid_output}"
-  exit 1
-fi
-rm -f "${postgresql_invalid_output}"
+[[ "${postgresql_backup_timer}" == *'"OnCalendar":"hourly"'* && "${postgresql_backup_timer}" == *'"Persistent":true'* ]]
+[[ "${postgresql_backup_script}" == *"/bin/nstdl-postgresql backup --location /var/backup/postgresql --keep-daily 3 --keep-weekly 2 --keep-monthly 1 --exclude app_staging"* ]]
+[[ "${postgresql_backup_user}" == "postgres" && "${postgresql_backup_after}" == *"postgresql-setup.service"* ]]
+[[ "${postgresql_backup_location}" == *'"/var/backup/postgresql":{"d":{'*'"group":"postgres","mode":"0700"'*'"user":"postgres"'* ]]
+[[ "${postgresql_restore_command}" == *"restore the roles and every database"* && "${postgresql_system_packages}" == *'"nstdl"'* ]]
 nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-secrets.config.age.rekey.hostPubkey"
 nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-secrets.config.age.rekey.extraEncryptionPubkeys"
 master_identity_count="$(nix eval "${override[@]}" --raw --apply 'identities: builtins.toString (builtins.length identities)' "${fixture}#nixosConfigurations.test-secrets.config.age.rekey.masterIdentities")"
@@ -438,6 +397,24 @@ grep -Eq '^database-password +ok +test-secrets$' <<<"${nstdl_status}"
 grep -Eq '^console-password +missing: run sync +-$' <<<"${nstdl_status}"
 grep -Eq '^console-password-hash +missing: run sync +-$' <<<"${nstdl_status}"
 grep -Eq '^user-password +missing: run sync +-$' <<<"${nstdl_status}"
+
+# The host's nstdl dispatcher and the PostgreSQL backup tool, whose tests run
+# against a throwaway server on this machine; the VM test evaluates everywhere
+# and runs on Linux.
+nix build --impure --no-link --expr "
+  let
+    pkgs = (builtins.getFlake \"path:${repo_dir}\").inputs.nixpkgs.legacyPackages.${host_system};
+    commands = pkgs.writeText \"commands.json\" \"{}\";
+  in
+  [
+    (pkgs.callPackage ${repo_dir}/packages/nstdl-host { inherit commands; }).tests.unit
+    (pkgs.callPackage ${repo_dir}/packages/nstdl-postgresql { }).tests.unit
+  ]
+"
+nix eval --no-eval-cache --raw "path:${repo_dir}#checks.x86_64-linux.postgresql-backup.drvPath" >/dev/null
+if [[ "${host_system}" == *-linux ]]; then
+  nix build --no-eval-cache --no-link "path:${repo_dir}#checks.${host_system}.postgresql-backup"
+fi
 
 # Garage feature: its VM test evaluates everywhere and runs on Linux, and key
 # IDs Garage would refuse to import are rejected at evaluation.
