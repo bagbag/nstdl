@@ -1,8 +1,9 @@
-"""Whole-cluster PostgreSQL backup sets, their restore, and declared role passwords.
+"""Whole-cluster PostgreSQL backup sets, their restore, declared role passwords
+and extension updates.
 
 `backup` runs as postgres from nstdl-postgresql-backup.service; `restore` runs
-as root through `nstdl postgresql restore`; `set-password` runs as postgres
-from nstdl-postgresql-reconcile.service."""
+as root through `nstdl postgresql restore`; `set-password` and
+`update-extensions` run as postgres from nstdl-postgresql-reconcile.service."""
 
 import argparse
 import base64
@@ -26,7 +27,7 @@ GLOBALS = "globals.sql"
 
 # pg_dumpall's own selection: template0 refuses connections, and -2 marks a
 # database an interrupted DROP DATABASE left invalid.
-BACKED_UP_DATABASES = "SELECT datname FROM pg_database WHERE datallowconn AND datconnlimit <> -2 ORDER BY datname"
+CONNECTABLE_DATABASES = "SELECT datname FROM pg_database WHERE datallowconn AND datconnlimit <> -2 ORDER BY datname"
 ALL_DATABASES = "SELECT datname FROM pg_database"
 # Tables an extension created (on a rebuilt host, before any data) do not count.
 HAS_TABLES = """
@@ -38,6 +39,11 @@ SELECT EXISTS (
     AND NOT EXISTS (
       SELECT FROM pg_depend d
       WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e'))
+"""
+# Oldest first, so an extension is updated before those created on top of it.
+OUTDATED_EXTENSIONS = """
+SELECT e.extname FROM pg_extension e JOIN pg_available_extensions a ON a.name = e.extname
+WHERE e.extversion IS DISTINCT FROM a.default_version ORDER BY e.oid
 """
 ROLE_EXISTS = re.compile(r'ERROR:\s+role ".*" already exists')
 ARCHIVE_DATABASE = re.compile(r"^;\s+dbname: (.*)$", re.MULTILINE)
@@ -105,7 +111,7 @@ def fsync(path: Path) -> None:
 def backup(location: Path, exclude: list[str], keep: dict[str, int], now: datetime | None = None) -> Path:
     for leftover in location.glob(IN_PROGRESS + "*"):
         shutil.rmtree(leftover)
-    databases = query(BACKED_UP_DATABASES)
+    databases = query(CONNECTABLE_DATABASES)
     for name in sorted(set(exclude) - set(databases)):
         print(f"warning: excluded database {name!r} does not exist", file=sys.stderr)
     name = (now or datetime.now(timezone.utc)).strftime(SET_FORMAT)
@@ -279,6 +285,14 @@ def set_password(role: str, path: Path) -> None:
     run(["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1"], input=f"ALTER ROLE {quote_identifier(role)} PASSWORD '{scram_verifier(password)}';\n")
 
 
+def update_extensions() -> None:
+    """Update every extension whose catalog version lags its installed files."""
+    for database in query(CONNECTABLE_DATABASES):
+        for extension in query(OUTDATED_EXTENSIONS, database):
+            print(f"updating extension {extension} in {database}", file=sys.stderr)
+            run(["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-c", f"ALTER EXTENSION {quote_identifier(extension)} UPDATE"], database)
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog=os.environ.get("NSTDL_PROG", "nstdl-postgresql"), description=__doc__)
     commands = root.add_subparsers(dest="command", required=True)
@@ -294,6 +308,7 @@ def parser() -> argparse.ArgumentParser:
     password_command = commands.add_parser("set-password", help="set a role's password, hashed here, from a file")
     password_command.add_argument("role")
     password_command.add_argument("file", type=Path)
+    commands.add_parser("update-extensions", help="update every extension whose catalog version lags its installed files")
     return root
 
 
@@ -305,8 +320,10 @@ def main(argv: list[str]) -> int:
             print(f"wrote {backup(arguments.location, arguments.exclude, keep)}", file=sys.stderr)
         elif arguments.command == "restore":
             restore(arguments.set, arguments.yes, arguments.reconcile_unit)
-        else:
+        elif arguments.command == "set-password":
             set_password(arguments.role, arguments.file)
+        else:
+            update_extensions()
     except Failure as failure:
         print(f"error: {failure}", file=sys.stderr)
         return 1

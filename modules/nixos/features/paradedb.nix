@@ -9,34 +9,23 @@
 let
   cfg = config.services.nstdl.paradedb;
 
-  # pgrx 0.19 declares rust-version 1.96 and errors out below it. The toolchain
-  # cannot come from nixpkgs: a consumer's `nixpkgs.follows` pulls this flake's
-  # nixpkgs down to theirs, and release branches lag. Only cargo and rustc are
-  # taken, so nothing else on the host changes compiler.
-  fenixPkgs = inputs.fenix.packages.${pkgs.stdenv.hostPlatform.system};
-  rustToolchain = fenixPkgs.combine [
-    fenixPkgs.stable.cargo
-    fenixPkgs.stable.rustc
-  ];
+  # Release branches lack pgrx 0.19's rustc and ParadeDB's exact cargo-pgrx, so
+  # only these build tools come from unstable. The extension itself builds in
+  # the host's package set: postgres loads it next to the host's glibc.
+  unstable = inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system};
 
   # Scoped to this evaluation rather than `nixpkgs.overlays`, which would put
-  # every Rust package on the host through a different compiler. Only
-  # derivations that consume `rustPlatform` are affected — here, cargo-pgrx and
-  # the extension — and `buildPgrxExtension` picks it up because it is
-  # `callPackage`d from this same set.
+  # every Rust package on the host through a different compiler.
+  # `buildPgrxExtension` picks it up because it is `callPackage`d from this
+  # same set.
   rustPkgs = pkgs.extend (
     _: prev: {
-      rustPlatform = prev.makeRustPlatform {
-        cargo = rustToolchain;
-        rustc = rustToolchain;
-      };
+      rustPlatform = prev.makeRustPlatform { inherit (unstable) cargo rustc; };
     }
   );
 
-  cargo-pgrx_0_19_0 = rustPkgs.callPackage ../../../packages/cargo-pgrx-0_19_0.nix { };
-
-  pg_search = rustPkgs.callPackage ../../../packages/pg-search-0_25.nix {
-    inherit cargo-pgrx_0_19_0;
+  pg_search = rustPkgs.callPackage ../../../packages/pg-search-0_26.nix {
+    inherit (unstable) cargo-pgrx;
     # Built against the host's own PostgreSQL, not the one in `rustPkgs`.
     postgresql = config.services.postgresql.package;
   };

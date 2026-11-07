@@ -105,6 +105,8 @@ let
         };
   };
 
+  nstdlOverlays = [ inputs.self.overlays.unstable ];
+
   nixosConfigurationFor =
     host:
     inputs.nixpkgs.lib.nixosSystem {
@@ -125,6 +127,7 @@ let
             };
           }
           (homeModuleFor "nixos" host)
+          { nixpkgs.overlays = nstdlOverlays; }
           { system.stateVersion = host.systemStateVersion; }
         ];
     };
@@ -146,6 +149,7 @@ let
             };
           }
           (homeModuleFor "darwin" host)
+          { nixpkgs.overlays = nstdlOverlays; }
           { system.stateVersion = host.systemStateVersion; }
         ];
     };
@@ -156,6 +160,7 @@ let
       pkgs = import inputs.nixpkgs {
         system = home.system;
         config.allowUnfree = true;
+        overlays = nstdlOverlays;
       };
       modules =
         selectProfiles config.nstdl.profiles.home home.features
@@ -568,8 +573,7 @@ in
           agenix = lib.getExe config.agenix-rekey.package;
           flakeSource = self.outPath;
           deployRs = if deployNodes == { } then null else inputs.deploy-rs.packages.${system}.default;
-          nixosAnywhere =
-            if flakeConfig.flake.nixosConfigurations == { } then null else pkgs.nixos-anywhere;
+          nixosAnywhere = if flakeConfig.flake.nixosConfigurations == { } then null else pkgs.nixos-anywhere;
           nixosInstall =
             if pkgs.stdenv.hostPlatform.isLinux && flakeConfig.flake.nixosConfigurations != { } then
               lib.getExe pkgs.nixos-install

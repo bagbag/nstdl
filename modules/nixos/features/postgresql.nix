@@ -163,50 +163,57 @@ in
       }) managedRoles;
     };
 
-    systemd.services.nstdl-postgresql-reconcile =
-      lib.mkIf (managedDatabases != { } || passwordRoles != { } || membershipRoles != { })
-        {
-          description = "nstdl PostgreSQL ownership and password reconciliation";
-          requires = [ "postgresql-setup.service" ];
-          after = [
-            "postgresql.service"
-            "postgresql-setup.service"
-          ];
-          wantedBy = [ "multi-user.target" ];
-          serviceConfig = {
-            Type = "oneshot";
-            User = "postgres";
-          }
-          // lib.optionalAttrs (passwordRoles != { }) {
-            LoadCredential = lib.mapAttrsToList (
-              name: role: "postgresql-role-${name}:${toString role.passwordFile}"
-            ) passwordRoles;
-          };
-          script = lib.concatStringsSep "\n" (
-            lib.mapAttrsToList (
-              name: database:
-              lib.optionalString (database.owner != null) ''
-                ${config.services.postgresql.package}/bin/psql --set=ON_ERROR_STOP=1 --command ${lib.escapeShellArg "ALTER DATABASE \"${name}\" OWNER TO \"${database.owner}\";"}
-              ''
-            ) managedDatabases
-            ++ lib.concatMap (
-              name:
-              map (role: ''
-                ${config.services.postgresql.package}/bin/psql --set=ON_ERROR_STOP=1 --command ${lib.escapeShellArg "GRANT \"${role}\" TO \"${name}\";"}
-              '') membershipRoles.${name}.memberOf
-            ) (lib.attrNames membershipRoles)
-            ++ lib.concatMap (
-              name:
-              map (extension: ''
-                ${config.services.postgresql.package}/bin/psql --set=ON_ERROR_STOP=1 --dbname ${lib.escapeShellArg name} --command ${lib.escapeShellArg "CREATE EXTENSION IF NOT EXISTS \"${extension}\" CASCADE;"}
-              '') managedDatabases.${name}.extensions
-            ) (lib.attrNames managedDatabases)
-            # Hashed (SCRAM-SHA-256) before the server sees it: the password
-            # stays out of its logs and pg_stat_activity.
-            ++ lib.mapAttrsToList (name: _: ''
-              ${lib.getExe cfg.tool} set-password ${lib.escapeShellArg name} "$CREDENTIALS_DIRECTORY/postgresql-role-${name}"
-            '') passwordRoles
-          );
-        };
+    systemd.services.nstdl-postgresql-reconcile = {
+      description = "nstdl PostgreSQL ownership, password and extension reconciliation";
+      requires = [ "postgresql-setup.service" ];
+      after = [
+        "postgresql.service"
+        "postgresql-setup.service"
+      ];
+      # Rerun on every server start, so an extension package bump gets its
+      # upgrade scripts. Starts come through postgresql.target, restarts
+      # through postgresql-setup's Requires= (hence RemainAfterExit).
+      wantedBy = [
+        "multi-user.target"
+        "postgresql.target"
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        User = "postgres";
+      }
+      // lib.optionalAttrs (passwordRoles != { }) {
+        LoadCredential = lib.mapAttrsToList (
+          name: role: "postgresql-role-${name}:${toString role.passwordFile}"
+        ) passwordRoles;
+      };
+      script = lib.concatStringsSep "\n" (
+        lib.mapAttrsToList (
+          name: database:
+          lib.optionalString (database.owner != null) ''
+            ${config.services.postgresql.package}/bin/psql --set=ON_ERROR_STOP=1 --command ${lib.escapeShellArg "ALTER DATABASE \"${name}\" OWNER TO \"${database.owner}\";"}
+          ''
+        ) managedDatabases
+        ++ lib.concatMap (
+          name:
+          map (role: ''
+            ${config.services.postgresql.package}/bin/psql --set=ON_ERROR_STOP=1 --command ${lib.escapeShellArg "GRANT \"${role}\" TO \"${name}\";"}
+          '') membershipRoles.${name}.memberOf
+        ) (lib.attrNames membershipRoles)
+        ++ lib.concatMap (
+          name:
+          map (extension: ''
+            ${config.services.postgresql.package}/bin/psql --set=ON_ERROR_STOP=1 --dbname ${lib.escapeShellArg name} --command ${lib.escapeShellArg "CREATE EXTENSION IF NOT EXISTS \"${extension}\" CASCADE;"}
+          '') managedDatabases.${name}.extensions
+        ) (lib.attrNames managedDatabases)
+        # Hashed (SCRAM-SHA-256) before the server sees it: the password
+        # stays out of its logs and pg_stat_activity.
+        ++ lib.mapAttrsToList (name: _: ''
+          ${lib.getExe cfg.tool} set-password ${lib.escapeShellArg name} "$CREDENTIALS_DIRECTORY/postgresql-role-${name}"
+        '') passwordRoles
+        # Last, so a failing upgrade script holds back no declared state.
+        ++ [ "${lib.getExe cfg.tool} update-extensions" ]
+      );
+    };
   };
 }

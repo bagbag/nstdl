@@ -123,6 +123,8 @@ class ServerTest(unittest.TestCase):
             self.sql(f"DROP DATABASE {tool.quote_identifier(name)} WITH (FORCE)")
         for role in ("app", "reporting", "login"):
             self.sql(f"DROP ROLE IF EXISTS {role}")
+        for database in ("postgres", "template1"):
+            self.sql("DROP EXTENSION IF EXISTS hstore", database)
         self.location = Path(tempfile.mkdtemp())
 
     def tearDown(self):
@@ -195,6 +197,20 @@ class ServerTest(unittest.TestCase):
         (self.location / "empty").write_bytes(b"\n")
         with self.assertRaisesRegex(tool.Failure, "holds no password"):
             tool.set_password("login", self.location / "empty")
+
+    def extension_version(self, database):
+        return self.sql("SELECT extversion FROM pg_extension WHERE extname = 'hstore'", database)
+
+    def test_update_extensions_brings_every_database_to_the_installed_version(self):
+        # As after a package update: the catalog still holds the old version.
+        self.sql("CREATE DATABASE app")
+        for database in ("app", "template1"):
+            self.sql("CREATE EXTENSION hstore VERSION '1.4'", database)
+        self.sql("CREATE EXTENSION hstore", "postgres")
+        installed = self.sql("SELECT default_version FROM pg_available_extensions WHERE name = 'hstore'")
+        tool.update_extensions()
+        for database in ("app", "template1", "postgres"):
+            self.assertEqual(self.extension_version(database), installed, database)
 
     def test_failed_dump_discards_the_whole_run(self):
         self.create_cluster()

@@ -40,9 +40,7 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = ''
-    machine.wait_for_unit("postgresql-setup.service")
-    # A oneshot that does not stay active: run it and fail on its failure.
-    machine.succeed("systemctl restart nstdl-postgresql-reconcile.service")
+    machine.wait_for_unit("nstdl-postgresql-reconcile.service")
 
     def sql(statement, database="postgres"):
         return machine.succeed(f"${psql} -d {database} -c \"{statement}\"").strip()

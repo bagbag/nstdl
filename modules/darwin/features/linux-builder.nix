@@ -41,8 +41,8 @@ in
       Builder VM memory in MiB.
 
       Only has to hold compiler processes, not build scratch, since `build-dir`
-      points at the data disk. If a build is OOM-killed, lower `maxJobs` before
-      raising this: `cores` already saturates the VM.
+      points at the data disk; overflow goes to zram in the guest. The VM keeps
+      host memory it has touched until it stops.
     '';
   };
 
@@ -212,6 +212,13 @@ in
           # `D!` empties it at boot: the disk persists, and builds interrupted
           # by a VM stop leave their scratch behind.
           systemd.tmpfiles.rules = [ "D! ${buildDir} 0755 root root -" ];
+
+          # Overflow without raising `memorySize`, which the VM keeps taken
+          # on the host.
+          zramSwap = {
+            enable = true;
+            memoryPercent = 100;
+          };
         })
 
         (lib.mkIf (!cfg.bootstrap && cfg.sandboxSecrets != { }) {

@@ -10,6 +10,7 @@
       # For local nstdl development:
       # url = "path:..";
       inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs-unstable.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
     };
   };

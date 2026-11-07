@@ -6,6 +6,10 @@
 
     flake-parts.url = "github:hercules-ci/flake-parts";
 
+    # Stays unstable when consumers move `nixpkgs` to a release: `pkgs.unstable`
+    # and paradedb's build tools.
+    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
+
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -41,15 +45,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Rust toolchain for the pgrx-based PostgreSQL extensions. pgrx 0.19
-    # declares rust-version 1.96, which nixpkgs release branches lag behind, and
-    # a consumer's `nixpkgs.follows` drags this flake's nixpkgs down to theirs —
-    # so the toolchain cannot come from nixpkgs. Detail in paradedb.nix.
-    fenix = {
-      url = "github:nix-community/fenix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
     nix-darwin = {
       url = "github:nix-darwin/nix-darwin";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -68,6 +63,9 @@
     in
     {
       flakeModules.default = import ./modules/flake-parts/default.nix { inherit inputs; };
+
+      # Applied to nstdl hosts; exported for configurations built without them.
+      overlays.unstable = import ./overlays/unstable.nix { inherit inputs; };
 
       # Individually consumable, for repositories that are not themselves built
       # on the flake-parts module above, e.g. an application's own NixOS VM
@@ -97,7 +95,11 @@
         {
           prepare-host-key = pkgs.writeShellApplication {
             name = "prepare-host-key";
-            runtimeInputs = [ pkgs.coreutils pkgs.git pkgs.openssh ];
+            runtimeInputs = [
+              pkgs.coreutils
+              pkgs.git
+              pkgs.openssh
+            ];
             text = builtins.readFile ./packages/prepare-host-key.sh;
           };
         }
@@ -111,6 +113,13 @@
         postgresql-backup = import ./tests/postgresql-backup.nix {
           pkgs = inputs.nixpkgs.legacyPackages.${system};
           module = ./modules/nixos/features/postgresql.nix;
+        };
+        paradedb = import ./tests/paradedb.nix {
+          pkgs = inputs.nixpkgs.legacyPackages.${system};
+          modules = [
+            inputs.self.nixosModules.paradedb
+            ./modules/nixos/features/postgresql.nix
+          ];
         };
       });
     };

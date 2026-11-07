@@ -18,6 +18,7 @@ This is a breaking redesign. The former Snowfall and `mkFlake` APIs are gone.
     nstdl = {
       url = "github:bagbag/nstdl";
       inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs-unstable.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
     };
   };
@@ -485,6 +486,9 @@ adds its own with
   files loaded as systemd credentials, so their contents cannot enter nstdl's
   Nix configuration; nstdl hashes them (SCRAM-SHA-256) before the server sees
   them, and a trailing line ending is not part of the password. `vectorchord` adds the VectorChord index extension.
+  After every server start, each extension whose catalog version lags its
+  installed package is updated (`ALTER EXTENSION … UPDATE`) in every database
+  that accepts connections, so a package bump needs no manual step.
   `backup.enable` writes a backup set of the whole server, daily by
   default (`calendar`; null for on demand only:
   `systemctl start nstdl-postgresql-backup`): one zstd-compressed custom-format
@@ -506,7 +510,8 @@ adds its own with
   one holding tables, it asks you to type its name, and without a terminal it
   refuses unless given `--yes`. It disconnects clients of replaced databases.
 - `paradedb`: ParadeDB `pg_search`, at the version tstdl's development image
-  runs rather than nixpkgs', built with a fenix toolchain and preloaded.
+  runs rather than nixpkgs', built against the host's PostgreSQL with rustc and
+  cargo-pgrx from the `nixpkgs-unstable` input, and preloaded.
   Create it per database through `postgresql`'s `extensions`.
 - `systemd-sandbox`: `services.nstdl.systemd.services.<name>.sandbox` applies a
   deny-by-default hardening preset to an existing unit; `relax` drops
@@ -517,8 +522,8 @@ adds its own with
   host secrets, such as a private registry token, into the VM's build sandbox;
   any build on the builder can read them, so keep it to a single-user
   workstation. Rotations arrive within a few minutes, and build scratch is
-  emptied at boot. On a fresh machine switch once with `bootstrap = true`,
-  then without.
+  emptied at boot. Builds that outgrow `memorySize` swap to zram inside the VM.
+  On a fresh machine switch once with `bootstrap = true`, then without.
 - `developer` (Home Manager) also provides
   `nstdl.programs.pnpm.registryAuth`: `auth.ini` holds a `tokenHelper` that
   reads the token file on each pnpm run, never the token. Set the agenix
@@ -554,9 +559,14 @@ configurations outside it, such as an application's VM test.
 ## Input sharing
 
 `nstdl` owns and locks its Home Manager, nix-darwin, nix-index-database, Disko,
-deploy-rs, and fenix inputs. The defaults pair unstable
-nixpkgs with Home Manager master. A consumer using those defaults only needs to
-share `nixpkgs` and `flake-parts`, as shown above.
+deploy-rs, and nixpkgs-unstable inputs. The defaults pair unstable nixpkgs with
+Home Manager master. A consumer using those defaults shares `nixpkgs` and
+`flake-parts`, and points `nixpkgs-unstable` at its `nixpkgs` too, as shown
+above, so the lock holds one nixpkgs revision.
+
+nstdl hosts get `nixpkgs-unstable` as `pkgs.unstable` (`overlays.unstable`,
+also exported). `paradedb` builds with tools from it, so only ever point it at
+an unstable input.
 
 A stable consumer must provide a matching nixpkgs and Home Manager release and
 make nstdl follow both. For example, a 26.05 consumer uses:
@@ -576,6 +586,32 @@ nstdl = {
   inputs.flake-parts.follows = "flake-parts";
 };
 ```
+
+Its hosts then run 26.05 and take single packages from nstdl's pinned
+unstable through `pkgs.unstable`. A stable consumer that also uses unstable
+directly, say for a package or module of its own, declares the input and
+points nstdl's at it, so both resolve to one revision it updates itself:
+
+```nix
+nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+home-manager = {
+  url = "github:nix-community/home-manager/release-26.05";
+  inputs.nixpkgs.follows = "nixpkgs";
+};
+
+nstdl = {
+  url = "github:bagbag/nstdl";
+  inputs.nixpkgs.follows = "nixpkgs";
+  inputs.nixpkgs-unstable.follows = "nixpkgs-unstable";
+  inputs.home-manager.follows = "home-manager";
+  inputs.flake-parts.follows = "flake-parts";
+};
+```
+
+There, `pkgs` is 26.05 and `pkgs.unstable` the consumer's own
+`nixpkgs-unstable`, the same revision as `inputs.nixpkgs-unstable`.
 
 The developer profile supports both Home Manager channels. Features absent
 from a stable Home Manager release, such as native fzf integration for

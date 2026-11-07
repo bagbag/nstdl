@@ -132,7 +132,13 @@ postgresql_reconcile_credentials="$(nix eval "${override[@]}" --json "${fixture}
 postgresql_reconcile_wanted_by="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-reconcile.wantedBy")"
 [[ "${postgresql_reconcile_script}" == *"GRANT \"app_readers\" TO \"app\""* && "${postgresql_reconcile_script}" == *"CREATE EXTENSION IF NOT EXISTS \"pgcrypto\""* ]]
 [[ "${postgresql_reconcile_credentials}" == *"postgresql-role-app:/run/agenix/app-db-password"* && "${postgresql_reconcile_script}" == *"/bin/nstdl-postgresql set-password app \"\$CREDENTIALS_DIRECTORY/postgresql-role-app\""* ]]
-[[ "${postgresql_reconcile_wanted_by}" == *"multi-user.target"* && "${postgresql_backup_after}" == *"postgresql-setup.service"* ]]
+[[ "${postgresql_reconcile_wanted_by}" == *"multi-user.target"* && "${postgresql_reconcile_wanted_by}" == *"postgresql.target"* && "${postgresql_backup_after}" == *"postgresql-setup.service"* ]]
+[[ "${postgresql_reconcile_script}" == *"/bin/nstdl-postgresql update-extensions"* ]]
+
+# Every host gets `pkgs.unstable` for its own system, with its nixpkgs config.
+[[ "$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-server.pkgs.unstable.stdenv.hostPlatform.system")" == "x86_64-linux" ]]
+[[ "$(nix eval "${override[@]}" --raw "${fixture}#darwinConfigurations.test-darwin.pkgs.unstable.stdenv.hostPlatform.system")" == "aarch64-darwin" ]]
+[[ "$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-server.pkgs.unstable.config.allowUnfree")" == "true" ]]
 [[ "${postgresql_backup_timer}" == *'"OnCalendar":"hourly"'* && "${postgresql_backup_timer}" == *'"Persistent":true'* ]]
 [[ "${postgresql_backup_script}" == *"/bin/nstdl-postgresql backup --location /var/backup/postgresql --keep-daily 3 --keep-weekly 2 --keep-monthly 1 --exclude app_staging"* ]]
 [[ "${postgresql_backup_user}" == "postgres" && "${postgresql_backup_after}" == *"postgresql-setup.service"* ]]
@@ -365,6 +371,7 @@ darwin_linux_builder_systems="$(nix eval "${override[@]}" --json "${fixture}#dar
 darwin_linux_builder_package="$(nix eval "${override[@]}" --raw "${fixture}#darwinConfigurations.test-darwin.config.nix.linux-builder.package.name")"
 darwin_distributed_builds="$(nix eval "${override[@]}" --json "${fixture}#darwinConfigurations.test-darwin.config.nix.distributedBuilds")"
 darwin_builder_substitutes="$(nix eval "${override[@]}" --json "${fixture}#darwinConfigurations.test-darwin.config.nix.settings.builders-use-substitutes")"
+darwin_builder_zram="$(nix eval "${override[@]}" --json "${fixture}#darwinConfigurations.test-darwin.config.nix.linux-builder.package.nixosConfig.zramSwap.enable")"
 [[ "${darwin_casks}" == *'"signal"'* ]]
 [[ "${darwin_home_packages}" == *'imagemagick-'* ]]
 for cask in coteditor firefox@developer-edition keka keepassxc linearmouse rustdesk spotify visual-studio-code whatsapp; do
@@ -373,6 +380,7 @@ done
 [[ "${darwin_podman_packages}" == *'"podman-'* && "${darwin_podman_packages}" == *'"podman-compose-'* && "${darwin_podman_packages}" == *'"sleepless-'* && "${darwin_sudo_extra_config}" == *'tester ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1'* && "${darwin_casks}" == *'"codex"'* && "${darwin_casks}" == *'"claude-code@latest"'* && "${darwin_casks}" == *'"claude"'* && "${darwin_casks}" == *'"chatgpt"'* && "${darwin_casks}" == *'"discord"'* && "${darwin_home_packages}" != *'codex-'* && "${darwin_home_packages}" != *'claude-code-'* && "${darwin_brews}" == *'"batt"'* && "${darwin_activation_script}" == *'/etc/batt.json'* && "${darwin_activation_script}" == *'launchctl kickstart -k system/org.nixos.nstdl-batt'* && "${darwin_nushell_config}" == *'extern batt'* ]]
 [[ "${darwin_qui_program}" == *'nstdl-qui-launcher'* && "${darwin_qui_keepalive}" == "true" ]]
 [[ "${darwin_linux_builder_enabled}" == "true" && "${darwin_linux_builder_systems}" == '["aarch64-linux","x86_64-linux"]' && "${darwin_linux_builder_package}" == "create-builder" && "${darwin_distributed_builds}" == "true" && "${darwin_builder_substitutes}" == "true" ]]
+[[ "${darwin_builder_zram}" == "true" ]]
 nix eval "${override[@]}" --raw "${fixture}#homeConfigurations.test-standalone.config.home.username"
 nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-workstation.config.home-manager.users.alice.home.username"
 nix eval "${override[@]}" --json "${fixture}#homeConfigurations.test-standalone.config.programs.lazygit.enable"
@@ -414,6 +422,12 @@ nix build --impure --no-link --expr "
 nix eval --no-eval-cache --raw "path:${repo_dir}#checks.x86_64-linux.postgresql-backup.drvPath" >/dev/null
 if [[ "${host_system}" == *-linux ]]; then
   nix build --no-eval-cache --no-link "path:${repo_dir}#checks.${host_system}.postgresql-backup"
+fi
+
+# ParadeDB feature: its VM test evaluates everywhere and runs on Linux.
+nix eval --no-eval-cache --raw "path:${repo_dir}#checks.x86_64-linux.paradedb.drvPath" >/dev/null
+if [[ "${host_system}" == *-linux ]]; then
+  nix build --no-eval-cache --no-link "path:${repo_dir}#checks.${host_system}.paradedb"
 fi
 
 # Garage feature: its VM test evaluates everywhere and runs on Linux, and key
