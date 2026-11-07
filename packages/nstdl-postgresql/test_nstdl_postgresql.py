@@ -1,6 +1,7 @@
 """Tests for nstdl-postgresql: retention and naming as pure functions, backup and
 restore against a throwaway PostgreSQL server on a Unix socket."""
 
+import io
 import os
 import subprocess
 import sys
@@ -105,7 +106,11 @@ class ServerTest(unittest.TestCase):
         subprocess.run(["initdb", "-D", str(cls.data), "-U", "postgres", "--auth=trust", "--no-sync"], check=True, capture_output=True)
         # The login role proves set-password's verifier; everyone else is trusted.
         (cls.data / "pg_hba.conf").write_text("local all login scram-sha-256\nlocal all all trust\n")
-        subprocess.run(["pg_ctl", "-D", str(cls.data), "-w", "-l", str(Path(cls.directory) / "log"), "-o", f"-k {cls.directory} -c listen_addresses= -c fsync=off", "start"], check=True, capture_output=True)
+        # Test extensions go to <extensions>/extension, searched first. pg_ctl
+        # starts the server through a shell, hence the escaped `$system`.
+        cls.extensions = Path(cls.directory) / "extensions"
+        (cls.extensions / "extension").mkdir(parents=True)
+        subprocess.run(["pg_ctl", "-D", str(cls.data), "-w", "-l", str(Path(cls.directory) / "log"), "-o", f"-k {cls.directory} -c listen_addresses= -c fsync=off -c extension_control_path={cls.extensions}:\\$system", "start"], check=True, capture_output=True)
         cls.environment = mock.patch.dict(os.environ, {"PGHOST": cls.directory, "PGUSER": "postgres"})
         cls.environment.start()
 
@@ -125,6 +130,7 @@ class ServerTest(unittest.TestCase):
             self.sql(f"DROP ROLE IF EXISTS {role}")
         for database in ("postgres", "template1"):
             self.sql("DROP EXTENSION IF EXISTS hstore", database)
+        self.sql("DROP EXTENSION IF EXISTS rollback_probe")
         self.location = Path(tempfile.mkdtemp())
 
     def tearDown(self):
@@ -211,6 +217,20 @@ class ServerTest(unittest.TestCase):
         tool.update_extensions()
         for database in ("app", "template1", "postgres"):
             self.assertEqual(self.extension_version(database), installed, database)
+
+    def test_update_extensions_leaves_a_catalog_newer_than_the_installed_files(self):
+        # As after a rollback: PostgreSQL ships no downgrade scripts.
+        directory = self.extensions / "extension"
+        (directory / "rollback_probe--1.0.sql").write_text("")
+        (directory / "rollback_probe--1.0--2.0.sql").write_text("")
+        control = directory / "rollback_probe.control"
+        control.write_text("default_version = '2.0'\nrelocatable = true\n")
+        self.sql("CREATE EXTENSION rollback_probe")
+        control.write_text("default_version = '1.0'\nrelocatable = true\n")
+        with mock.patch.object(sys, "stderr", io.StringIO()) as stderr:
+            tool.update_extensions()
+        self.assertEqual(self.sql("SELECT extversion FROM pg_extension WHERE extname = 'rollback_probe'"), ["2.0"])
+        self.assertIn("rollback_probe in postgres", stderr.getvalue())
 
     def test_failed_dump_discards_the_whole_run(self):
         self.create_cluster()

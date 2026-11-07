@@ -122,98 +122,102 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable {
-    assertions = [
-      {
-        assertion = lib.all (name: builtins.match "^[A-Za-z_][A-Za-z0-9_$]*$" name != null) (
-          lib.attrNames managedRoles
-        );
-        message = "nstdl PostgreSQL role names must be unquoted PostgreSQL identifiers.";
-      }
-      {
-        assertion = lib.all (name: builtins.match "^[A-Za-z_][A-Za-z0-9_$]*$" name != null) (
-          lib.attrNames managedDatabases
-        );
-        message = "nstdl PostgreSQL database names must be unquoted PostgreSQL identifiers.";
-      }
-    ];
-    services.postgresql = {
-      enable = true;
+  config = lib.mkMerge [
+    # Every host running PostgreSQL, managed or not: a package bump needs the
+    # extension's upgrade scripts. postgresql-setup reruns on every server start
+    # and skips standbys, which cannot write the catalog.
+    (lib.mkIf config.services.postgresql.enable {
+      systemd.services.postgresql-setup.script = lib.mkAfter ''
+        ${lib.getExe cfg.tool} update-extensions
+      '';
+    })
 
-      # VectorChord depends on pgvector and refuses `LOAD`. No `mkDefault`
-      # on the preload: the option merges by concatenation, so a default would
-      # be discarded as soon as anything else preloads a library.
-      extensions = lib.mkIf cfg.vectorchord (ps: [
-        ps.pgvector
-        ps.vectorchord
-      ]);
-      settings.shared_preload_libraries = lib.mkIf cfg.vectorchord [ "vchord.so" ];
-
-      ensureDatabases = lib.attrNames managedDatabases;
-      ensureUsers = lib.mapAttrsToList (name: role: {
-        inherit name;
-        ensureClauses = {
-          login = role.login;
-          "inherit" = role.inheritRole;
-          inherit (role) createdb createrole replication;
+    (lib.mkIf cfg.enable {
+      assertions = [
+        {
+          assertion = lib.all (name: builtins.match "^[A-Za-z_][A-Za-z0-9_$]*$" name != null) (
+            lib.attrNames managedRoles
+          );
+          message = "nstdl PostgreSQL role names must be unquoted PostgreSQL identifiers.";
         }
-        // lib.optionalAttrs (role.connectionLimit != null) {
-          connection_limit = role.connectionLimit;
-        };
-      }) managedRoles;
-    };
+        {
+          assertion = lib.all (name: builtins.match "^[A-Za-z_][A-Za-z0-9_$]*$" name != null) (
+            lib.attrNames managedDatabases
+          );
+          message = "nstdl PostgreSQL database names must be unquoted PostgreSQL identifiers.";
+        }
+      ];
+      services.postgresql = {
+        enable = true;
 
-    systemd.services.nstdl-postgresql-reconcile = {
-      description = "nstdl PostgreSQL ownership, password and extension reconciliation";
-      requires = [ "postgresql-setup.service" ];
-      after = [
-        "postgresql.service"
-        "postgresql-setup.service"
-      ];
-      # Rerun on every server start, so an extension package bump gets its
-      # upgrade scripts. Starts come through postgresql.target, restarts
-      # through postgresql-setup's Requires= (hence RemainAfterExit).
-      wantedBy = [
-        "multi-user.target"
-        "postgresql.target"
-      ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        User = "postgres";
-      }
-      // lib.optionalAttrs (passwordRoles != { }) {
-        LoadCredential = lib.mapAttrsToList (
-          name: role: "postgresql-role-${name}:${toString role.passwordFile}"
-        ) passwordRoles;
+        # VectorChord depends on pgvector and refuses `LOAD`. No `mkDefault`
+        # on the preload: the option merges by concatenation, so a default would
+        # be discarded as soon as anything else preloads a library.
+        extensions = lib.mkIf cfg.vectorchord (ps: [
+          ps.pgvector
+          ps.vectorchord
+        ]);
+        settings.shared_preload_libraries = lib.mkIf cfg.vectorchord [ "vchord.so" ];
+
+        ensureDatabases = lib.attrNames managedDatabases;
+        ensureUsers = lib.mapAttrsToList (name: role: {
+          inherit name;
+          ensureClauses = {
+            login = role.login;
+            "inherit" = role.inheritRole;
+            inherit (role) createdb createrole replication;
+          }
+          // lib.optionalAttrs (role.connectionLimit != null) {
+            connection_limit = role.connectionLimit;
+          };
+        }) managedRoles;
       };
-      script = lib.concatStringsSep "\n" (
-        lib.mapAttrsToList (
-          name: database:
-          lib.optionalString (database.owner != null) ''
-            ${config.services.postgresql.package}/bin/psql --set=ON_ERROR_STOP=1 --command ${lib.escapeShellArg "ALTER DATABASE \"${name}\" OWNER TO \"${database.owner}\";"}
-          ''
-        ) managedDatabases
-        ++ lib.concatMap (
-          name:
-          map (role: ''
-            ${config.services.postgresql.package}/bin/psql --set=ON_ERROR_STOP=1 --command ${lib.escapeShellArg "GRANT \"${role}\" TO \"${name}\";"}
-          '') membershipRoles.${name}.memberOf
-        ) (lib.attrNames membershipRoles)
-        ++ lib.concatMap (
-          name:
-          map (extension: ''
-            ${config.services.postgresql.package}/bin/psql --set=ON_ERROR_STOP=1 --dbname ${lib.escapeShellArg name} --command ${lib.escapeShellArg "CREATE EXTENSION IF NOT EXISTS \"${extension}\" CASCADE;"}
-          '') managedDatabases.${name}.extensions
-        ) (lib.attrNames managedDatabases)
-        # Hashed (SCRAM-SHA-256) before the server sees it: the password
-        # stays out of its logs and pg_stat_activity.
-        ++ lib.mapAttrsToList (name: _: ''
-          ${lib.getExe cfg.tool} set-password ${lib.escapeShellArg name} "$CREDENTIALS_DIRECTORY/postgresql-role-${name}"
-        '') passwordRoles
-        # Last, so a failing upgrade script holds back no declared state.
-        ++ [ "${lib.getExe cfg.tool} update-extensions" ]
-      );
-    };
-  };
+
+      systemd.services.nstdl-postgresql-reconcile =
+        lib.mkIf (managedDatabases != { } || passwordRoles != { } || membershipRoles != { })
+          {
+            description = "nstdl PostgreSQL ownership and password reconciliation";
+            requires = [ "postgresql-setup.service" ];
+            after = [
+              "postgresql.service"
+              "postgresql-setup.service"
+            ];
+            wantedBy = [ "multi-user.target" ];
+            serviceConfig = {
+              Type = "oneshot";
+              User = "postgres";
+            }
+            // lib.optionalAttrs (passwordRoles != { }) {
+              LoadCredential = lib.mapAttrsToList (
+                name: role: "postgresql-role-${name}:${toString role.passwordFile}"
+              ) passwordRoles;
+            };
+            script = lib.concatStringsSep "\n" (
+              lib.mapAttrsToList (
+                name: database:
+                lib.optionalString (database.owner != null) ''
+                  ${config.services.postgresql.package}/bin/psql --set=ON_ERROR_STOP=1 --command ${lib.escapeShellArg "ALTER DATABASE \"${name}\" OWNER TO \"${database.owner}\";"}
+                ''
+              ) managedDatabases
+              ++ lib.concatMap (
+                name:
+                map (role: ''
+                  ${config.services.postgresql.package}/bin/psql --set=ON_ERROR_STOP=1 --command ${lib.escapeShellArg "GRANT \"${role}\" TO \"${name}\";"}
+                '') membershipRoles.${name}.memberOf
+              ) (lib.attrNames membershipRoles)
+              ++ lib.concatMap (
+                name:
+                map (extension: ''
+                  ${config.services.postgresql.package}/bin/psql --set=ON_ERROR_STOP=1 --dbname ${lib.escapeShellArg name} --command ${lib.escapeShellArg "CREATE EXTENSION IF NOT EXISTS \"${extension}\" CASCADE;"}
+                '') managedDatabases.${name}.extensions
+              ) (lib.attrNames managedDatabases)
+              # Hashed (SCRAM-SHA-256) before the server sees it: the password
+              # stays out of its logs and pg_stat_activity.
+              ++ lib.mapAttrsToList (name: _: ''
+                ${lib.getExe cfg.tool} set-password ${lib.escapeShellArg name} "$CREDENTIALS_DIRECTORY/postgresql-role-${name}"
+              '') passwordRoles
+            );
+          };
+    })
+  ];
 }

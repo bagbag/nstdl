@@ -486,9 +486,13 @@ adds its own with
   files loaded as systemd credentials, so their contents cannot enter nstdl's
   Nix configuration; nstdl hashes them (SCRAM-SHA-256) before the server sees
   them, and a trailing line ending is not part of the password. `vectorchord` adds the VectorChord index extension.
-  After every server start, each extension whose catalog version lags its
-  installed package is updated (`ALTER EXTENSION … UPDATE`) in every database
-  that accepts connections, so a package bump needs no manual step.
+  On every host running PostgreSQL, with or without `enable`, each server
+  start updates (`ALTER EXTENSION … UPDATE`) every extension whose catalog
+  version differs from its installed package, in every database that accepts
+  connections, so a package bump needs no manual step. It runs in
+  `postgresql-setup`, so a failing upgrade script holds back
+  `postgresql.target`; a version without an update path, such as a catalog
+  newer than the package after a rollback, is left as is with a warning.
   `backup.enable` writes a backup set of the whole server, daily by
   default (`calendar`; null for on demand only:
   `systemctl start nstdl-postgresql-backup`): one zstd-compressed custom-format

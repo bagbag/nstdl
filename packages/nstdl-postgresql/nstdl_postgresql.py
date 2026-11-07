@@ -2,8 +2,9 @@
 and extension updates.
 
 `backup` runs as postgres from nstdl-postgresql-backup.service; `restore` runs
-as root through `nstdl postgresql restore`; `set-password` and
-`update-extensions` run as postgres from nstdl-postgresql-reconcile.service."""
+as root through `nstdl postgresql restore`; `set-password` runs as postgres
+from nstdl-postgresql-reconcile.service, `update-extensions` from
+postgresql-setup.service."""
 
 import argparse
 import base64
@@ -41,10 +42,17 @@ SELECT EXISTS (
       WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e'))
 """
 # Oldest first, so an extension is updated before those created on top of it.
+# Split by whether an update path exists: after a rollback the catalog is newer
+# than the files, and extensions ship no downgrade scripts.
 OUTDATED_EXTENSIONS = """
 SELECT e.extname FROM pg_extension e JOIN pg_available_extensions a ON a.name = e.extname
-WHERE e.extversion IS DISTINCT FROM a.default_version ORDER BY e.oid
+WHERE e.extversion IS DISTINCT FROM a.default_version AND {} EXISTS (
+  SELECT FROM pg_extension_update_paths(e.extname) p
+  WHERE p.source = e.extversion AND p.target = a.default_version AND p.path IS NOT NULL)
+ORDER BY e.oid
 """
+UPDATABLE_EXTENSIONS = OUTDATED_EXTENSIONS.format("")
+STRANDED_EXTENSIONS = OUTDATED_EXTENSIONS.format("NOT")
 ROLE_EXISTS = re.compile(r'ERROR:\s+role ".*" already exists')
 ARCHIVE_DATABASE = re.compile(r"^;\s+dbname: (.*)$", re.MULTILINE)
 SCRAM_ITERATIONS = 4096  # PostgreSQL's default scram_iterations
@@ -286,11 +294,14 @@ def set_password(role: str, path: Path) -> None:
 
 
 def update_extensions() -> None:
-    """Update every extension whose catalog version lags its installed files."""
+    """Update every extension whose catalog version differs from its installed
+    files along an update path; warn about the rest."""
     for database in query(CONNECTABLE_DATABASES):
-        for extension in query(OUTDATED_EXTENSIONS, database):
+        for extension in query(UPDATABLE_EXTENSIONS, database):
             print(f"updating extension {extension} in {database}", file=sys.stderr)
             run(["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-c", f"ALTER EXTENSION {quote_identifier(extension)} UPDATE"], database)
+        for extension in query(STRANDED_EXTENSIONS, database):
+            print(f"warning: no update path for extension {extension} in {database} to its installed version; left as is", file=sys.stderr)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -308,7 +319,7 @@ def parser() -> argparse.ArgumentParser:
     password_command = commands.add_parser("set-password", help="set a role's password, hashed here, from a file")
     password_command.add_argument("role")
     password_command.add_argument("file", type=Path)
-    commands.add_parser("update-extensions", help="update every extension whose catalog version lags its installed files")
+    commands.add_parser("update-extensions", help="update every extension whose catalog version differs from its installed files")
     return root
 
 

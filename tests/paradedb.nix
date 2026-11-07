@@ -31,7 +31,9 @@ pkgs.testers.runNixOSTest {
         return sql(f"SELECT default_version FROM pg_available_extensions WHERE name = '{name}'")
 
     # Preloaded: postgres only starts if the library's RUNPATH resolves.
-    machine.wait_for_unit("nstdl-postgresql-reconcile.service")
+    machine.wait_for_unit("postgresql-setup.service")
+    # Creates pg_search in `app`; a oneshot that does not stay active.
+    machine.succeed("systemctl restart nstdl-postgresql-reconcile.service")
 
     with subtest("the declared extension's catalog matches the loaded binary"):
         version = extension_version("pg_search")
@@ -50,7 +52,7 @@ pkgs.testers.runNixOSTest {
         sql("DROP EXTENSION IF EXISTS hstore")
         sql("CREATE EXTENSION hstore VERSION '1.4'")
         machine.succeed(action)
-        machine.wait_for_unit("nstdl-postgresql-reconcile.service")
+        machine.wait_for_unit("postgresql-setup.service")
         machine.wait_until_succeeds(
             f"test \"$(${psql} -d app -c \"SELECT extversion FROM pg_extension WHERE extname = 'hstore'\")\" = '{available_version('hstore')}'",
             timeout=60,

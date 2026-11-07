@@ -132,8 +132,32 @@ postgresql_reconcile_credentials="$(nix eval "${override[@]}" --json "${fixture}
 postgresql_reconcile_wanted_by="$(nix eval "${override[@]}" --json "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.nstdl-postgresql-reconcile.wantedBy")"
 [[ "${postgresql_reconcile_script}" == *"GRANT \"app_readers\" TO \"app\""* && "${postgresql_reconcile_script}" == *"CREATE EXTENSION IF NOT EXISTS \"pgcrypto\""* ]]
 [[ "${postgresql_reconcile_credentials}" == *"postgresql-role-app:/run/agenix/app-db-password"* && "${postgresql_reconcile_script}" == *"/bin/nstdl-postgresql set-password app \"\$CREDENTIALS_DIRECTORY/postgresql-role-app\""* ]]
-[[ "${postgresql_reconcile_wanted_by}" == *"multi-user.target"* && "${postgresql_reconcile_wanted_by}" == *"postgresql.target"* && "${postgresql_backup_after}" == *"postgresql-setup.service"* ]]
-[[ "${postgresql_reconcile_script}" == *"/bin/nstdl-postgresql update-extensions"* ]]
+[[ "${postgresql_reconcile_wanted_by}" == *"multi-user.target"* && "${postgresql_backup_after}" == *"postgresql-setup.service"* ]]
+
+# Extension updates run with every server start, also where nstdl manages no
+# roles or databases (as on a host whose application provisions its own).
+postgresql_setup_script="$(nix eval "${override[@]}" --apply 'builtins.unsafeDiscardStringContext' --raw "${fixture}#nixosConfigurations.test-postgresql.config.systemd.services.postgresql-setup.script")"
+[[ "${postgresql_setup_script}" == *"/bin/nstdl-postgresql update-extensions"* ]]
+unmanaged_postgresql="$(nix eval --impure --json --expr "
+  let
+    flake = builtins.getFlake \"path:${repo_dir}\";
+    config = (flake.inputs.nixpkgs.lib.nixosSystem {
+      system = \"x86_64-linux\";
+      modules = [
+        (import ${repo_dir}/modules/nixos/features/postgresql.nix)
+        {
+          services.postgresql.enable = true;
+          system.stateVersion = \"25.11\";
+        }
+      ];
+    }).config;
+  in
+  {
+    updates = builtins.match \".*/bin/nstdl-postgresql update-extensions.*\" (builtins.unsafeDiscardStringContext config.systemd.services.postgresql-setup.script) != null;
+    reconcile = config.systemd.services ? nstdl-postgresql-reconcile;
+  }
+")"
+[[ "${unmanaged_postgresql}" == '{"reconcile":false,"updates":true}' ]]
 
 # Every host gets `pkgs.unstable` for its own system, with its nixpkgs config.
 [[ "$(nix eval "${override[@]}" --raw "${fixture}#nixosConfigurations.test-server.pkgs.unstable.stdenv.hostPlatform.system")" == "x86_64-linux" ]]

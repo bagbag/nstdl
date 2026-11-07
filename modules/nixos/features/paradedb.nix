@@ -24,7 +24,7 @@ let
     }
   );
 
-  pg_search = rustPkgs.callPackage ../../../packages/pg-search-0_26.nix {
+  pg_search = rustPkgs.callPackage ../../../packages/pg-search.nix {
     inherit (unstable) cargo-pgrx;
     # Built against the host's own PostgreSQL, not the one in `rustPkgs`.
     postgresql = config.services.postgresql.package;

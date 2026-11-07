@@ -93,7 +93,7 @@ buildPgrxExtension (finalAttrs: {
 
   # `superkmeans` (openblas feature, off macOS) links `-lopenblas`; 0.26.5
   # calls none of it, so `--as-needed` drops it again.
-  buildInputs = [ openblas ];
+  buildInputs = lib.optionals (!stdenv.hostPlatform.isDarwin) [ openblas ];
 
   # The library is preloaded: one unresolvable dependency keeps postgres from
   # starting, so fail the build instead.
