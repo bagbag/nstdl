@@ -5,6 +5,7 @@ let
       pnpm
       bun
       deno
+      typescript
       typescript-language-server
       oxlint
     ];
