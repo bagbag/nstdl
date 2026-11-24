@@ -86,6 +86,8 @@ in
       homebrew.casks = [
         "codex"
         "claude-code@latest"
+        "antigravity"
+        "antigravity-cli"
         "claude"
         "chatgpt"
       ];

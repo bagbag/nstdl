@@ -447,8 +447,8 @@ adds its own with
   `container-development`, language toolchains, database and office tools,
   desktop application bundles, `vscode`, `ai-agent-tools`, and `secret-admin`.
   `ai-agent-tools` installs Codex and Claude Code through Nix on Linux; on
-  Darwin it installs the Codex, latest-channel Claude Code, Claude, and ChatGPT
-  Homebrew casks. On both platforms it installs the beads (`bd`) agent issue
+  Darwin it installs the Codex, latest-channel Claude Code, Antigravity and its CLI,
+  Claude, and ChatGPT Homebrew casks. On both platforms it installs the beads (`bd`) agent issue
   tracker through Nix. Codex runs every command in a non-interactive login
   Zsh (`zsh -lc`) and cannot select another shell, so the feature makes that
   Zsh split unquoted variables, keep unmatched globs and leave `=word` literal,
